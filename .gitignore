@@ -1,0 +1,38 @@
+# Keil MDK-ARM
+MDK-ARM/Objects/
+MDK-ARM/Listings/
+MDK-ARM/DebugConfig/
+MDK-ARM/*.uvoptx
+MDK-ARM/*.uvguix.*
+MDK-ARM/*.scvd
+MDK-ARM/RTE/
+
+# Compiler/Linker Output
+*.o
+*.d
+*.crf
+*.dep
+*.map
+*.htm
+*.lnp
+*.axf
+*.elf
+*.hex
+*.bin
+*.lib
+*.sct
+*.lst
+
+# J-Link / Debugger
+JLinkLog.txt
+*.jlink
+*.ini
+
+# STM32CubeMX
+.mxproject
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*~
