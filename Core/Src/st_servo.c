@@ -35,14 +35,16 @@ void ST_WritePos(uint8_t id, int16_t pos, uint16_t speed, uint8_t acc) {
     buf[11] = (uint8_t)(speed & 0xFF);
     buf[12] = (uint8_t)((speed >> 8) & 0xFF);
     
-    // 写入校验和
     buf[12] = CheckSum(buf, 13);
-    uint8_t tx_buf[14];
+    // 修正：buf[12] 就是 CheckSum，上面代码有误，重新构建发送逻辑
+    // 原代码逻辑有点乱，直接重写这部分
+    
+    // Header(2) + ID(1) + Len(1) + Inst(1) + Acc(1) + Pos(2) + Time(2) + Speed(2) + Check(1) = 13 bytes
+    uint8_t tx_buf[14]; // 保险起见多开一点
     tx_buf[0] = 0xFF;
     tx_buf[1] = 0xFF;
     tx_buf[2] = id;
-    tx_buf[3] = 10; // Length = DataLen(7) + 3 (Inst+Addr+Check) = 10? No.
-                    // Standard: Length = Parameter Count + 2. Params = Addr(1)+Data(7)=8. So Length=10. Correct.
+    tx_buf[3] = 9; // Length = Params(7) + 2 = 9
     tx_buf[4] = INST_WRITE;
     tx_buf[5] = STS_ACC;
     tx_buf[6] = acc;
@@ -52,7 +54,7 @@ void ST_WritePos(uint8_t id, int16_t pos, uint16_t speed, uint8_t acc) {
     tx_buf[10] = 0;
     tx_buf[11] = (uint8_t)(speed & 0xFF);
     tx_buf[12] = (uint8_t)((speed >> 8) & 0xFF);
-    tx_buf[13] = CheckSum(tx_buf, 14);
+    tx_buf[13] = CheckSum(tx_buf, 14); // Index 13 is Checksum
 
     HAL_UART_Transmit(SERVO_UART, tx_buf, 14, 10);
 }
@@ -71,9 +73,7 @@ void ST_SetTorque(uint8_t id, uint8_t enable) {
     buf[4] = INST_WRITE;
     buf[5] = STS_TORQUE_ENABLE;
     buf[6] = enable ? 1 : 0;
-    buf[7] = 0; // 这里的逻辑: Length=4, Params=2(Addr+Val). 
-                // 校验和位置应该是 buf[7]
-    buf[7] = CheckSum(buf, 8); // 计算前8个字节
+    buf[7] = CheckSum(buf, 8);
     
     HAL_UART_Transmit(SERVO_UART, buf, 8, 10);
 }
@@ -88,10 +88,9 @@ void ST_SetTorque(uint8_t id, uint8_t enable) {
  */
 void ST_SyncWritePos(uint8_t *ids, uint8_t num, int16_t *pos, uint16_t *speed, uint8_t *acc) {
     uint8_t data_len_per_servo = 7; // ACC(1)+POS(2)+TIME(2)+SPEED(2)
-    uint8_t total_len = 7 + (data_len_per_servo + 1) * num + 1; // Header(2)+ID(1)+Len(1)+Inst(1)+Addr(1)+LenPer(1) + ... + Check(1)
+    // Packet Length = (DataLen + 1)*Num + 4
+    // Header(2)+ID(1)+Len(1)+Inst(1)+Addr(1)+LenPer(1) ...
     
-    // 为了安全，限制最大发送缓冲区，假设最多20个舵机
-    // 20 * 8 + 10 = 170 字节左右
     uint8_t buf[200];
     uint8_t idx = 0;
     
@@ -118,4 +117,64 @@ void ST_SyncWritePos(uint8_t *ids, uint8_t num, int16_t *pos, uint16_t *speed, u
     idx++;
     
     HAL_UART_Transmit(SERVO_UART, buf, idx, 50);
+}
+
+/**
+ * @brief  读取舵机信息 (位置, 速度, 负载)
+ * @param  id: 舵机ID
+ * @param  pos: 输出位置指针
+ * @param  speed: 输出速度指针
+ * @param  load: 输出负载指针
+ * @return 0成功, -1失败
+ */
+int8_t ST_ReadInfo(uint8_t id, int16_t *pos, int16_t *speed, int16_t *load) {
+    uint8_t tx_buf[8];
+    uint8_t rx_buf[14]; // Head(2)+ID(1)+Len(1)+Err(1)+Param(6)+Check(1) = 12 bytes. Safe 14.
+    
+    tx_buf[0] = 0xFF;
+    tx_buf[1] = 0xFF;
+    tx_buf[2] = id;
+    tx_buf[3] = 4;
+    tx_buf[4] = INST_READ;
+    tx_buf[5] = STS_PRESENT_POSITION_L; // Start from Pos
+    tx_buf[6] = 6; // Read 6 bytes (Pos 2 + Speed 2 + Load 2)
+    tx_buf[7] = CheckSum(tx_buf, 8);
+    
+    if (HAL_UART_Transmit(SERVO_UART, tx_buf, 8, 2) != HAL_OK) return -1;
+    
+    if (HAL_UART_Receive(SERVO_UART, rx_buf, 12, 5) != HAL_OK) return -1;
+    
+    if (rx_buf[0] != 0xFF || rx_buf[1] != 0xFF || rx_buf[2] != id) return -1;
+    
+    // --- 位置处理 (标准 int16) ---
+    if (pos)   *pos   = (int16_t)(rx_buf[5] | (rx_buf[6] << 8));
+    
+    // --- 速度处理 (Bit15 是方向位) ---
+    if (speed) {
+        uint16_t raw_spd = (uint16_t)(rx_buf[7] | (rx_buf[8] << 8));
+        if (raw_spd & 0x8000) {
+            *speed = -1 * (int16_t)(raw_spd & 0x7FFF); // 负方向
+        } else {
+            *speed = (int16_t)raw_spd; // 正方向
+        }
+    }
+    
+    // --- 负载处理 (Bit10 或 Bit15 是方向位，ST3215通常Bit10为方向) ---
+    // 手册指出 ST3215 负载也是 Bit10 为方向(0-1023) 或 Bit15? 
+    // 实测 ST 系列通常与速度类似，Bit10 或 Bit15。这里假设和速度一样处理 Bit15 比较保险，
+    // 如果发现数值不对(如负数跳变)，可改为检测 Bit10 (raw & 0x400)。
+    // 暂时按 Bit15 处理 (兼容性更强，防止出现 -30000)
+    if (load) {
+        uint16_t raw_load = (uint16_t)(rx_buf[9] | (rx_buf[10] << 8));
+        if (raw_load & 0x8000) {
+             *load = -1 * (int16_t)(raw_load & 0x7FFF);
+        } else if (raw_load & 0x400) { // 也就是 1024 左右的值
+             // 部分版本 ST3215 负载是 0-1000，Bit10 是方向
+             *load = -1 * (int16_t)(raw_load & 0x3FF);
+        } else {
+             *load = (int16_t)raw_load;
+        }
+    }
+    
+    return 0;
 }

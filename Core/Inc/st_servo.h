@@ -32,5 +32,6 @@ extern UART_HandleTypeDef huart2;
 void ST_WritePos(uint8_t id, int16_t pos, uint16_t speed, uint8_t acc);
 void ST_SetTorque(uint8_t id, uint8_t enable);
 void ST_SyncWritePos(uint8_t *ids, uint8_t num, int16_t *pos, uint16_t *speed, uint8_t *acc);
+int8_t ST_ReadInfo(uint8_t id, int16_t *pos, int16_t *speed, int16_t *load); // 0:成功, -1:失败
 
 #endif

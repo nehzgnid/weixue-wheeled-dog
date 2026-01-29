@@ -261,8 +261,8 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
 static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
   /* USER CODE BEGIN 6 */
-  // 调用我们的处理回调
-  USB_Data_Rx_Handler(Buf, *Len);
+  // 将接收到的数据推入环形缓冲区，供 CommRxTask 处理
+  USB_RingBuffer_Push(Buf, *Len);
   
   USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);
