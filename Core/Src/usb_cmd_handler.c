@@ -50,16 +50,18 @@ void Servo_Process_Loop(void) {
     uint8_t *pData = &usb_cmd_buffer[2];
     
     for(int i = 0; i < SERVO_COUNT; i++) {
-        // 解析格式: [ID, PosL, PosH]
+        // 解析格式: [ID, PosL, PosH, SpdL, SpdH, Acc]
         ids[i] = *pData++;
         
         uint8_t pl = *pData++;
         uint8_t ph = *pData++;
         positions[i] = (int16_t)(pl | (ph << 8));
         
-        // 填充默认速度/加速度
-        speeds[i] = CMD_DEFAULT_SPEED;
-        accs[i] = CMD_DEFAULT_ACC;
+        uint8_t sl = *pData++;
+        uint8_t sh = *pData++;
+        speeds[i] = (uint16_t)(sl | (sh << 8));
+        
+        accs[i] = *pData++;
     }
     
     // 调用总线驱动，立即发送

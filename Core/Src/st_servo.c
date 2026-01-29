@@ -36,13 +36,7 @@ void ST_WritePos(uint8_t id, int16_t pos, uint16_t speed, uint8_t acc) {
     buf[12] = (uint8_t)((speed >> 8) & 0xFF);
     
     // 写入校验和
-    buf[12] = CheckSum(buf, 13); // 这里是个小bug修正：校验和应该是最后一个字节，原数组大小13，下标12是最后一个
-    // 但上面的 buf[12] 已经被 speed 高位占用了，数组开小了？
-    // 让我们重新数一下：
-    // Header(2) + ID(1) + Len(1) + Inst(1) + Addr(1) + Data(7) + Check(1) = 14字节
-    // 抱歉，上面数组定义小了1个字节，逻辑需要微调。
-    
-    // 重新定义并修正逻辑
+    buf[12] = CheckSum(buf, 13);
     uint8_t tx_buf[14];
     tx_buf[0] = 0xFF;
     tx_buf[1] = 0xFF;

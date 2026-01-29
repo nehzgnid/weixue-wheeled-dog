@@ -12,10 +12,10 @@
 // 控制舵机数量
 #define SERVO_COUNT 6
 
-// 每个舵机数据长度: ID(1) + POS_L(1) + POS_H(1) = 3字节
-#define BYTES_PER_SERVO 3
+// 每个舵机数据长度: ID(1) + POS_L(1) + POS_H(1) + SPD_L(1) + SPD_H(1) + ACC(1) = 6字节
+#define BYTES_PER_SERVO 6
 
-// 包总长: Head(2) + Data(6*3) + Checksum(1) = 21字节
+// 包总长: Head(2) + Data(6*6) + Checksum(1) = 39字节
 #define PACKET_SIZE (2 + (SERVO_COUNT * BYTES_PER_SERVO) + 1)
 
 // === 全局变量 ===
