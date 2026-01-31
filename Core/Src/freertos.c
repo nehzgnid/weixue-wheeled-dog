@@ -2,7 +2,7 @@
 /**
   ******************************************************************************
   * File Name          : freertos.c
-  * Description        : Code for freertos applications
+  * Description        : 强化学习专用同步固件 (RL-Sync Firmware)
   ******************************************************************************
   */
 /* USER CODE END Header */
@@ -24,28 +24,22 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-// 舵机批处理指令结构
 typedef struct {
     uint8_t count;
     ServoCtrlParam_t params[MAX_SERVO_COUNT];
 } ServoBatch_t;
 /* USER CODE END PTD */
 
-/* Private define ------------------------------------------------------------*/
-/* USER CODE BEGIN PD */
-#define FEEDBACK_PERIOD_MS 10 
-/* USER CODE END PD */
-
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
-
-/* USER CODE END PM */
-
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
-static uint8_t active_servo_list[] = {1, 2, 3, 4, 5, 6}; 
-static uint8_t active_servo_count = 6;
+extern UART_HandleTypeDef huart2;
+extern UART_HandleTypeDef huart4;
+
+// 动态检测结果
+static uint8_t active_servo_list[18] = {0}; 
+static uint8_t active_servo_count = 0;
 /* USER CODE END Variables */
+
 /* Definitions for ServoTask */
 osThreadId_t ServoTaskHandle;
 const osThreadAttr_t ServoTask_attributes = {
@@ -65,14 +59,14 @@ osThreadId_t CommRxTaskHandle;
 const osThreadAttr_t CommRxTask_attributes = {
   .name = "CommRxTask",
   .stack_size = 512 * 4,
-  .priority = (osPriority_t) osPriorityAboveNormal,
+  .priority = (osPriority_t) osPriorityHigh, // 提升优先级
 };
 /* Definitions for CommTxTask */
 osThreadId_t CommTxTaskHandle;
 const osThreadAttr_t CommTxTask_attributes = {
   .name = "CommTxTask",
   .stack_size = 512 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
+  .priority = (osPriority_t) osPriorityHigh, // 提升优先级
 };
 /* Definitions for CommTxQueue */
 osMessageQueueId_t CommTxQueueHandle;
@@ -84,15 +78,49 @@ osMessageQueueId_t ServoCmdQueueHandle;
 const osMessageQueueAttr_t ServoCmdQueue_attributes = {
   .name = "ServoCmdQueue"
 };
-/* Definitions for ServoUartMutex */
-osMutexId_t ServoUartMutexHandle;
-const osMutexAttr_t ServoUartMutex_attributes = {
-  .name = "ServoUartMutex"
+/* Definitions for ServoUart1Mutex */
+osMutexId_t ServoUart1MutexHandle;
+const osMutexAttr_t ServoUart1Mutex_attributes = {
+  .name = "ServoUart1Mutex"
+};
+/* Definitions for ServoUart2Mutex */
+osMutexId_t ServoUart2MutexHandle;
+const osMutexAttr_t ServoUart2Mutex_attributes = {
+  .name = "ServoUart2Mutex"
 };
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
 extern void MX_USB_DEVICE_Init(void);
+
+// 内部辅助函数：Ping 舵机
+static int PingServo(uint8_t id) {
+    UART_HandleTypeDef *huart = (id <= 6) ? &huart2 : &huart4;
+    uint8_t tx[6] = {0xFF, 0xFF, id, 0x02, INST_PING, 0};
+    uint8_t rx[6];
+    
+    uint8_t sum = 0;
+    int i;
+    for(i=2; i<5; i++) sum += tx[i];
+    tx[5] = ~sum;
+    
+    HAL_UART_Transmit(huart, tx, 6, 2);
+    if (HAL_UART_Receive(huart, rx, 6, 2) == HAL_OK) {
+        if (rx[0]==0xFF && rx[1]==0xFF && rx[2]==id) return 1; 
+    }
+    return 0; 
+}
+
+static void ScanServos(void) {
+    active_servo_count = 0;
+    int id;
+    for (id = 1; id <= 12; id++) { 
+        if (PingServo(id)) {
+            active_servo_list[active_servo_count++] = id;
+        }
+        osDelay(2);
+    }
+}
 /* USER CODE END FunctionPrototypes */
 
 void StartServoTask(void *argument);
@@ -100,183 +128,170 @@ void StartFeedbackTask(void *argument);
 void StartCommRxTask(void *argument);
 void StartCommTxTask(void *argument);
 
-void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
+void MX_FREERTOS_Init(void); 
 
-/**
-  * @brief  FreeRTOS initialization
-  * @param  None
-  * @retval None
-  */
 void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN Init */
-  IMU_Init(); // 启动 IMU DMA
+  IMU_Init(); 
   /* USER CODE END Init */
-  /* Create the mutex(es) */
-  /* creation of ServoUartMutex */
-  ServoUartMutexHandle = osMutexNew(&ServoUartMutex_attributes);
 
-  /* USER CODE BEGIN RTOS_MUTEX */
-  /* USER CODE END RTOS_MUTEX */
+  ServoUart1MutexHandle = osMutexNew(&ServoUart1Mutex_attributes);
+  ServoUart2MutexHandle = osMutexNew(&ServoUart2Mutex_attributes);
 
-  /* USER CODE BEGIN RTOS_SEMAPHORES */
-  /* USER CODE END RTOS_SEMAPHORES */
-
-  /* USER CODE BEGIN RTOS_TIMERS */
-  /* USER CODE END RTOS_TIMERS */
-
-  /* Create the queue(s) */
-  /* creation of CommTxQueue */
   CommTxQueueHandle = osMessageQueueNew (8, 128, &CommTxQueue_attributes);
-
-  /* creation of ServoCmdQueue */
   ServoCmdQueueHandle = osMessageQueueNew (4, 128, &ServoCmdQueue_attributes);
 
-  /* USER CODE BEGIN RTOS_QUEUES */
-  /* USER CODE END RTOS_QUEUES */
-
-  /* Create the thread(s) */
-  /* creation of ServoTask */
   ServoTaskHandle = osThreadNew(StartServoTask, NULL, &ServoTask_attributes);
-
-  /* creation of FeedbackTask */
   FeedbackTaskHandle = osThreadNew(StartFeedbackTask, NULL, &FeedbackTask_attributes);
-
-  /* creation of CommRxTask */
   CommRxTaskHandle = osThreadNew(StartCommRxTask, NULL, &CommRxTask_attributes);
-
-  /* creation of CommTxTask */
   CommTxTaskHandle = osThreadNew(StartCommTxTask, NULL, &CommTxTask_attributes);
-
-  /* USER CODE BEGIN RTOS_THREADS */
-  /* USER CODE END RTOS_THREADS */
-
-  /* USER CODE BEGIN RTOS_EVENTS */
-  /* USER CODE END RTOS_EVENTS */
-
 }
 
 /* USER CODE BEGIN Header_StartServoTask */
-/**
-  * @brief  Function implementing the ServoTask thread.
-  * @param  argument: Not used
-  * @retval None
-  */
-/* USER CODE END Header_StartServoTask */
 void StartServoTask(void *argument)
 {
-  /* init code for USB_DEVICE */
-  // MX_USB_DEVICE_Init(); // 这里的自动生成代码有时会引发问题，我们移到下面手动调用
-  /* USER CODE BEGIN StartServoTask */
-  
-  osDelay(100);       // 等待电源稳定
-  MX_USB_DEVICE_Init(); // 手动初始化 USB (确保 main.c 没调用过)
+  osDelay(100);
+  MX_USB_DEVICE_Init(); 
   
   ServoBatch_t cmd;
-  // 临时数组
-  uint8_t ids[MAX_SERVO_COUNT];
-  int16_t positions[MAX_SERVO_COUNT];
-  uint16_t speeds[MAX_SERVO_COUNT];
-  uint8_t accs[MAX_SERVO_COUNT];
+  uint8_t ids1[6], ids2[6];
+  int16_t pos1[6], pos2[6];
+  uint16_t spd1[6], spd2[6];
+  uint8_t acc1[6], acc2[6];
 
   osDelay(500); 
-
-  // 初始上锁
-  if (osMutexAcquire(ServoUartMutexHandle, osWaitForever) == osOK) {
-    int i;
-    for(i=0; i<6; i++) { 
-        ST_SetTorque(active_servo_list[i], 1);
-        HAL_Delay(5);
-    }
-    osMutexRelease(ServoUartMutexHandle);
+  
+  // === 上电自检：恢复自动扫描模式 ===
+  if (osMutexAcquire(ServoUart1MutexHandle, osWaitForever) == osOK) {
+      if (osMutexAcquire(ServoUart2MutexHandle, osWaitForever) == osOK) {
+          ScanServos();
+          osMutexRelease(ServoUart2MutexHandle);
+      }
+      osMutexRelease(ServoUart1MutexHandle);
   }
 
-  /* Infinite loop */
+  // 只对在线的舵机上锁
+  int i;
+  for(i=0; i < active_servo_count; i++) {
+      uint8_t id = active_servo_list[i];
+      UART_HandleTypeDef *huart = (id <= 6) ? &huart2 : &huart4;
+      osMutexId_t mutex = (id <= 6) ? ServoUart1MutexHandle : ServoUart2MutexHandle;
+      
+      if (osMutexAcquire(mutex, 10) == osOK) {
+          ST_SetTorque(huart, id, 1);
+          osMutexRelease(mutex);
+      }
+      osDelay(5);
+  }
+
   for(;;)
   {
-      // 等待指令
       if (osMessageQueueGet(ServoCmdQueueHandle, &cmd, NULL, osWaitForever) == osOK) {
-          if (osMutexAcquire(ServoUartMutexHandle, 10) == osOK) {
-              int i;
-              for(i=0; i<cmd.count; i++) {
-                  ids[i] = cmd.params[i].id;
-                  positions[i] = cmd.params[i].pos;
-                  speeds[i] = cmd.params[i].speed;
-                  accs[i] = cmd.params[i].acc;
+          uint8_t n1 = 0, n2 = 0;
+          int j;
+          for(j=0; j<cmd.count; j++) {
+              if (cmd.params[j].id <= 6) { 
+                  ids1[n1] = cmd.params[j].id;
+                  pos1[n1] = cmd.params[j].pos;
+                  spd1[n1] = cmd.params[j].speed;
+                  acc1[n1] = cmd.params[j].acc;
+                  n1++;
+              } else { 
+                  ids2[n2] = cmd.params[j].id;
+                  pos2[n2] = cmd.params[j].pos;
+                  spd2[n2] = cmd.params[j].speed;
+                  acc2[n2] = cmd.params[j].acc;
+                  n2++;
               }
-              ST_SyncWritePos(ids, cmd.count, positions, speeds, accs);
-              osMutexRelease(ServoUartMutexHandle);
+          }
+          
+          if (n1 > 0 && osMutexAcquire(ServoUart1MutexHandle, 5) == osOK) {
+              ST_SyncWritePos(&huart2, ids1, n1, pos1, spd1, acc1);
+              osMutexRelease(ServoUart1MutexHandle);
+          }
+          if (n2 > 0 && osMutexAcquire(ServoUart2MutexHandle, 5) == osOK) {
+              ST_SyncWritePos(&huart4, ids2, n2, pos2, spd2, acc2);
+              osMutexRelease(ServoUart2MutexHandle);
           }
       }
   }
-  /* USER CODE END StartServoTask */
 }
 
 /* USER CODE BEGIN Header_StartFeedbackTask */
 /**
-* @brief Function implementing the FeedbackTask thread.
-* @param argument: Not used
-* @retval None
-*/
+  * @brief  RL专用: 同步采集任务
+  *         将 IMU 和 舵机数据打包在同一帧发送
+  */
 /* USER CODE END Header_StartFeedbackTask */
 void StartFeedbackTask(void *argument)
 {
-  /* USER CODE BEGIN StartFeedbackTask */
-  CommPacket_t fb_pkt;
-  CommPacket_t imu_pkt;
+  CommPacket_t rl_pkt;
+  rl_pkt.type = TYPE_RL_STATE;
   
-  ServoFBParam_t *fb_data = (ServoFBParam_t*)&fb_pkt.data[1]; 
+  // 结构: [IMU(36B)] + [Count(1B)] + [Servo1(7B)] + [Servo2(7B)]...
+  uint8_t *imu_ptr = rl_pkt.data;
+  uint8_t *servo_count_ptr = &rl_pkt.data[36];
+  ServoFBParam_t *servo_data_ptr = (ServoFBParam_t*)&rl_pkt.data[37];
   
   for(;;)
   {
-      osDelay(10); // 100Hz
+      osDelay(10); // 100Hz 严格周期
       
-      // 1. IMU 处理
-      IMU_Parse_Loop();
+      // 1. 获取 IMU 快照 (无论是否更新，取当前最新值)
+      IMU_Parse_Loop(); 
+      memcpy(imu_ptr, &g_imu_data, 36);
+      g_imu_data.updated = 0; // 清标志，虽然RL模式下不依赖标志触发
       
-      if (g_imu_data.updated) {
-          g_imu_data.updated = 0;
-          imu_pkt.type = TYPE_SENSOR_IMU;
-          imu_pkt.len = sizeof(IMU_Data_t) - 1; 
-          memcpy(imu_pkt.data, &g_imu_data, imu_pkt.len);
-          osMessageQueuePut(CommTxQueueHandle, &imu_pkt, 0, 0);
-      }
-      
-      // 2. 舵机读取
-      fb_pkt.type = TYPE_SERVO_FB;
-      fb_pkt.data[0] = active_servo_count; 
+      // 2. 获取 舵机 快照
+      *servo_count_ptr = active_servo_count;
       
       int i;
       for(i=0; i < active_servo_count; i++) {
           uint8_t id = active_servo_list[i];
-          if (osMutexAcquire(ServoUartMutexHandle, 5) == osOK) {
-              ST_ReadInfo(id, &fb_data[i].pos, &fb_data[i].speed, &fb_data[i].load);
-              fb_data[i].id = id;
-              osMutexRelease(ServoUartMutexHandle);
+          UART_HandleTypeDef *target_uart = (id <= 6) ? &huart2 : &huart4;
+          osMutexId_t target_mutex = (id <= 6) ? ServoUart1MutexHandle : ServoUart2MutexHandle;
+          
+          if (osMutexAcquire(target_mutex, 5) == osOK) {
+              ST_ReadInfo(target_uart, id, 
+                          &servo_data_ptr[i].pos, 
+                          &servo_data_ptr[i].speed, 
+                          &servo_data_ptr[i].load);
+              servo_data_ptr[i].id = id;
+              osMutexRelease(target_mutex);
+          } else {
+              // 采集失败填默认值，防止错位
+              servo_data_ptr[i].id = id;
+              servo_data_ptr[i].pos = -1;
           }
-          osDelay(1); 
+          osDelay(1); // 这里的微小延迟是为了给发送腾出总线间隙
       }
-      fb_pkt.len = 1 + active_servo_count * sizeof(ServoFBParam_t);
-      osMessageQueuePut(CommTxQueueHandle, &fb_pkt, 0, 0);
+      
+      // 3. 计算总长度并发送
+      // 36 (IMU) + 1 (Count) + N * 7 (Servos)
+      rl_pkt.len = 37 + active_servo_count * sizeof(ServoFBParam_t);
+      
+      // 只有当有数据时才发送，避免空跑垃圾数据
+      if (active_servo_count > 0 || g_imu_data.angle[2] != 0.0f) {
+           osMessageQueuePut(CommTxQueueHandle, &rl_pkt, 0, 0);
+      }
   }
-  /* USER CODE END StartFeedbackTask */
 }
 
 /* USER CODE BEGIN Header_StartCommRxTask */
-/**
-* @brief Function implementing the CommRxTask thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartCommRxTask */
 void StartCommRxTask(void *argument)
 {
-  /* USER CODE BEGIN StartCommRxTask */
   uint8_t byte, state = 0, type = 0, len = 0, idx = 0, checksum = 0;
   uint8_t payload[128];
 
   for(;;)
   {
-      if (USB_RingBuffer_Pop(&byte)) {
+      // 1. 等待数据到达信号 (无限等待，不消耗CPU)
+      //    只要 USB 中断触发，就会设置 0x01，这里立即醒来
+      osThreadFlagsWait(0x01, osFlagsWaitAny, osWaitForever);
+
+      // 2. 批量处理环形缓冲区里的所有数据
+      //    数据可能是一个字节，也可能是一整包(64字节)
+      while (USB_RingBuffer_Pop(&byte)) {
           switch(state) {
               case 0: if (byte == PROTOCOL_HEAD_1) { state = 1; checksum = byte; } break;
               case 1: if (byte == PROTOCOL_HEAD_2) { state = 2; checksum += byte; } else state = 0; break;
@@ -294,53 +309,47 @@ void StartCommRxTask(void *argument)
                               }
                           } else if (type == TYPE_PING) {
                               CommPacket_t pong;
-                              pong.type = TYPE_PING;
-                              pong.len = len;
+                              pong.type = TYPE_PING; pong.len = len;
                               memcpy(pong.data, payload, len);
-                              osMessageQueuePut(CommTxQueueHandle, &pong, 0, 0);
+                              // PING 包优先级极高，直接放入队首 (Priority 1)
+                              osMessageQueuePut(CommTxQueueHandle, &pong, 1, 0); 
                           }
                       }
                       state = 0; break;
           }
-      } else { osDelay(1); }
+      }
   }
-  /* USER CODE END StartCommRxTask */
 }
 
 /* USER CODE BEGIN Header_StartCommTxTask */
-/**
-* @brief Function implementing the CommTxTask thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartCommTxTask */
 void StartCommTxTask(void *argument)
 {
-  /* USER CODE BEGIN StartCommTxTask */
   CommPacket_t pkt;
-  uint8_t buf[132]; 
-  
+  uint8_t buf[140]; 
   for(;;)
   {
+      // 优先级高的包 (Ping) 会先出队
       if (osMessageQueueGet(CommTxQueueHandle, &pkt, NULL, osWaitForever) == osOK) {
-          buf[0] = PROTOCOL_HEAD_1;
-          buf[1] = PROTOCOL_HEAD_2;
-          buf[2] = pkt.type;
-          buf[3] = pkt.len;
+          buf[0] = PROTOCOL_HEAD_1; buf[1] = PROTOCOL_HEAD_2;
+          buf[2] = pkt.type; buf[3] = pkt.len;
           memcpy(&buf[4], pkt.data, pkt.len);
-          
           uint8_t sum = 0;
           int i;
           for(i=0; i < (pkt.len + 4); i++) sum += buf[i];
           buf[pkt.len + 4] = sum;
           
-          CDC_Transmit_FS(buf, pkt.len + 5);
+          // === 关键优化: 阻塞式发送 ===
+          // 只要 USB 是忙的 (USBD_BUSY)，就一直等，直到发出去为止
+          // 这保证了数据不丢失，且 Ping 包不会因为忙而被丢弃
+          uint8_t ret = USBD_BUSY;
+          while (ret == USBD_BUSY) {
+              ret = CDC_Transmit_FS(buf, pkt.len + 5);
+              if (ret == USBD_BUSY) {
+                  osDelay(1); // 让出 CPU 给 USB 中断去处理发送完成事件
+              }
+          }
       }
   }
-  /* USER CODE END StartCommTxTask */
 }
-
-/* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
-
 /* USER CODE END Application */

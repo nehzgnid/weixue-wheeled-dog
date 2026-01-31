@@ -23,6 +23,8 @@
 
 /* USER CODE BEGIN INCLUDE */
 #include "usb_cmd_handler.h"
+#include "cmsis_os.h" // 引入 FreeRTOS API
+extern osThreadId_t CommRxTaskHandle; // 引用接收任务句柄
 /* USER CODE END INCLUDE */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -264,6 +266,11 @@ static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
   // 将接收到的数据推入环形缓冲区，供 CommRxTask 处理
   USB_RingBuffer_Push(Buf, *Len);
   
+  // 关键修改：发送信号量唤醒任务 (0x01 是标志位)
+  if (CommRxTaskHandle != NULL) {
+      osThreadFlagsSet(CommRxTaskHandle, 0x01);
+  }
+
   USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);
   return (USBD_OK);

@@ -405,6 +405,11 @@
               <FilePath>..\Core\Src\usb_cmd_handler.c</FilePath>
             </File>
             <File>
+              <FileName>imu_handler.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\imu_handler.c</FilePath>
+            </File>
+            <File>
               <FileName>main.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/main.c</FilePath>
@@ -545,11 +550,6 @@
               <FileName>stm32f4xx_hal_timebase_tim.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/stm32f4xx_hal_timebase_tim.c</FilePath>
-            </File>
-            <File>
-              <FileName>imu_handler.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Core\Src\imu_handler.c</FilePath>
             </File>
           </Files>
         </Group>

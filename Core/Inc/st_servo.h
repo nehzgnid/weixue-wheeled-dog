@@ -3,11 +3,11 @@
 
 #include "main.h"
 
-// 串口句柄定义 (根据MX配置，您使用的是 USART2)
-extern UART_HandleTypeDef huart2;
-#define SERVO_UART &huart2
+// 移除硬编码的宏定义，改为函数传参
+// extern UART_HandleTypeDef huart2;
+// #define SERVO_UART &huart2
 
-// ST系列舵机寄存器地址 (参考微雪手册)
+// ST系列舵机寄存器地址
 #define STS_ID                  5
 #define STS_BAUD_RATE           6
 #define STS_MIN_ANGLE_LIMIT_L   9
@@ -28,10 +28,10 @@ extern UART_HandleTypeDef huart2;
 #define INST_ACTION     0x05
 #define INST_SYNC_WRITE 0x83
 
-// API 函数声明
-void ST_WritePos(uint8_t id, int16_t pos, uint16_t speed, uint8_t acc);
-void ST_SetTorque(uint8_t id, uint8_t enable);
-void ST_SyncWritePos(uint8_t *ids, uint8_t num, int16_t *pos, uint16_t *speed, uint8_t *acc);
-int8_t ST_ReadInfo(uint8_t id, int16_t *pos, int16_t *speed, int16_t *load); // 0:成功, -1:失败
+// API 函数声明 (增加 huart 参数)
+void ST_WritePos(UART_HandleTypeDef *huart, uint8_t id, int16_t pos, uint16_t speed, uint8_t acc);
+void ST_SetTorque(UART_HandleTypeDef *huart, uint8_t id, uint8_t enable);
+void ST_SyncWritePos(UART_HandleTypeDef *huart, uint8_t *ids, uint8_t num, int16_t *pos, uint16_t *speed, uint8_t *acc);
+int8_t ST_ReadInfo(UART_HandleTypeDef *huart, uint8_t id, int16_t *pos, int16_t *speed, int16_t *load);
 
 #endif
