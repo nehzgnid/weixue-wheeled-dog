@@ -252,18 +252,30 @@ void StartFeedbackTask(void *argument)
           osMutexId_t target_mutex = (id <= 6) ? ServoUart1MutexHandle : ServoUart2MutexHandle;
           
           if (osMutexAcquire(target_mutex, 5) == osOK) {
-              ST_ReadInfo(target_uart, id, 
-                          &servo_data_ptr[i].pos, 
-                          &servo_data_ptr[i].speed, 
-                          &servo_data_ptr[i].load);
+              int8_t res = -1;
+              // 重试机制 (Retry 3 times)
+              for(int k=0; k<3; k++) {
+                  res = ST_ReadInfo(target_uart, id, 
+                              &servo_data_ptr[i].pos, 
+                              &servo_data_ptr[i].speed, 
+                              &servo_data_ptr[i].load);
+                  if (res == 0) break; // 成功则退出
+                  osDelay(1); // 失败稍微等一下
+              }
+              
+              if (res != 0) {
+                  // 读取失败，标记为 0，方便上位机识别连接断开或超时
+                  servo_data_ptr[i].pos = 0;
+              }
+              
               servo_data_ptr[i].id = id;
               osMutexRelease(target_mutex);
           } else {
-              // 采集失败填默认值，防止错位
+              // 获取互斥锁失败
               servo_data_ptr[i].id = id;
-              servo_data_ptr[i].pos = -1;
+              servo_data_ptr[i].pos = 0;
           }
-          osDelay(1); // 这里的微小延迟是为了给发送腾出总线间隙
+          osDelay(1); // 恢复为 1ms，保证整体采样频率接近 100Hz
       }
       
       // 3. 计算总长度并发送
@@ -306,6 +318,17 @@ void StartCommRxTask(void *argument)
                               if (batch.count <= MAX_SERVO_COUNT) {
                                   memcpy(batch.params, &payload[1], batch.count * sizeof(ServoCtrlParam_t));
                                   osMessageQueuePut(ServoCmdQueueHandle, &batch, 0, 0);
+                              }
+                          } else if (type == TYPE_TORQUE_CTRL) {
+                              uint8_t enable = payload[0];
+                              for(int i=0; i < active_servo_count; i++) {
+                                  uint8_t id = active_servo_list[i];
+                                  UART_HandleTypeDef *huart = (id <= 6) ? &huart2 : &huart4;
+                                  osMutexId_t mutex = (id <= 6) ? ServoUart1MutexHandle : ServoUart2MutexHandle;
+                                  if (osMutexAcquire(mutex, 10) == osOK) {
+                                      ST_SetTorque(huart, id, enable);
+                                      osMutexRelease(mutex);
+                                  }
                               }
                           } else if (type == TYPE_PING) {
                               CommPacket_t pong;

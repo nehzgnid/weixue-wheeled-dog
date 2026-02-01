@@ -101,8 +101,16 @@ int8_t ST_ReadInfo(UART_HandleTypeDef *huart, uint8_t id, int16_t *pos, int16_t 
     tx_buf[6] = 6; 
     tx_buf[7] = CheckSum(tx_buf, 8);
     
+    // === 关键修复: 清除 ORE 标志 ===
+    // ORE (Overrun Error) 会导致 HAL_UART_Receive 立即失败。
+    // 读取 SR 和 DR 序列可清除该标志。
+    volatile uint32_t tmp;
+    tmp = huart->Instance->SR;
+    tmp = huart->Instance->DR;
+    (void)tmp;
+
     if (HAL_UART_Transmit(huart, tx_buf, 8, 2) != HAL_OK) return -1;
-    if (HAL_UART_Receive(huart, rx_buf, 12, 5) != HAL_OK) return -1;
+    if (HAL_UART_Receive(huart, rx_buf, 12, 20) != HAL_OK) return -1;
     if (rx_buf[0] != 0xFF || rx_buf[1] != 0xFF || rx_buf[2] != id) return -1;
     
     if (pos) *pos = (int16_t)(rx_buf[5] | (rx_buf[6] << 8));

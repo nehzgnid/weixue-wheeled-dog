@@ -11,6 +11,7 @@
 // --- 包类型定义 (Packet Types) ---
 #define TYPE_PING            0x01  
 #define TYPE_SERVO_CTRL      0x10  
+#define TYPE_TORQUE_CTRL     0x11  
 #define TYPE_SERVO_FB        0x20  
 #define TYPE_SENSOR_IMU      0x30  
 #define TYPE_RL_STATE        0x40  // 新增: 强化学习专用全状态包
