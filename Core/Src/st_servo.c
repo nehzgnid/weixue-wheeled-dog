@@ -19,7 +19,7 @@ void ST_WritePos(UART_HandleTypeDef *huart, uint8_t id, int16_t pos, uint16_t sp
     tx_buf[0] = 0xFF;
     tx_buf[1] = 0xFF;
     tx_buf[2] = id;
-    tx_buf[3] = 9; 
+    tx_buf[3] = acc; 
     tx_buf[4] = INST_WRITE;
     tx_buf[5] = STS_ACC;
     tx_buf[6] = acc;

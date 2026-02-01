@@ -24,10 +24,10 @@
 #pragma pack(1)
 
 // 舵机单机控制参数 (6 bytes)
-typedef struct {
+typedef struct __attribute__((packed)) { // 加上这个！防止编译器插入 Padding
     uint8_t id;
     int16_t pos;
-    int16_t speed;
+    uint16_t speed;
     uint8_t acc;
 } ServoCtrlParam_t;
 

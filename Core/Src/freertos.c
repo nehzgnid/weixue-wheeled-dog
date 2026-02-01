@@ -24,7 +24,7 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-typedef struct {
+typedef struct __attribute__((packed)) { // <--- 这里也要加！！！
     uint8_t count;
     ServoCtrlParam_t params[MAX_SERVO_COUNT];
 } ServoBatch_t;
