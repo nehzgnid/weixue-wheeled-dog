@@ -30,6 +30,14 @@
 
 // API 函数声明 (增加 huart 参数)
 void ST_WritePos(UART_HandleTypeDef *huart, uint8_t id, int16_t pos, uint16_t speed, uint8_t acc);
+// 声明同步读函数
+// ids: 舵机ID数组
+// count: 舵机数量
+// rx_buf: 接收缓冲区，必须足够大 (count * 12)
+// 返回值: 成功接收的字节数，负数表示错误
+int ST_SyncRead(UART_HandleTypeDef *huart, uint8_t *ids, uint8_t count, uint8_t *rx_buf);
+
+// 现有的声明...
 void ST_SetTorque(UART_HandleTypeDef *huart, uint8_t id, uint8_t enable);
 void ST_SyncWritePos(UART_HandleTypeDef *huart, uint8_t *ids, uint8_t num, int16_t *pos, uint16_t *speed, uint8_t *acc);
 int8_t ST_ReadInfo(UART_HandleTypeDef *huart, uint8_t id, int16_t *pos, int16_t *speed, int16_t *load);

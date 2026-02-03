@@ -218,77 +218,99 @@ void StartServoTask(void *argument)
 }
 
 /* USER CODE BEGIN Header_StartFeedbackTask */
-/**
-  * @brief  RL专用: 同步采集任务
-  *         将 IMU 和 舵机数据打包在同一帧发送
-  */
-/* USER CODE END Header_StartFeedbackTask */
 void StartFeedbackTask(void *argument)
 {
   CommPacket_t rl_pkt;
   rl_pkt.type = TYPE_RL_STATE;
   
-  // 结构: [IMU(36B)] + [Count(1B)] + [Servo1(7B)] + [Servo2(7B)]...
   uint8_t *imu_ptr = rl_pkt.data;
   uint8_t *servo_count_ptr = &rl_pkt.data[36];
   ServoFBParam_t *servo_data_ptr = (ServoFBParam_t*)&rl_pkt.data[37];
   
+  // 临时缓冲区 (栈上分配)
+  uint8_t group1_ids[6]; uint8_t group1_cnt;
+  uint8_t group2_ids[6]; uint8_t group2_cnt;
+  uint8_t rx_buf1[72]; // 6 * 12
+  uint8_t rx_buf2[72];
+  
   for(;;)
   {
-      osDelay(10); // 100Hz 严格周期
+      osDelay(5); // 200Hz !
       
-      // 1. 获取 IMU 快照 (无论是否更新，取当前最新值)
       IMU_Parse_Loop(); 
       memcpy(imu_ptr, &g_imu_data, 36);
-      g_imu_data.updated = 0; // 清标志，虽然RL模式下不依赖标志触发
+      g_imu_data.updated = 0; 
       
-      // 2. 获取 舵机 快照
       *servo_count_ptr = active_servo_count;
       
-      int i;
-      for(i=0; i < active_servo_count; i++) {
+      // 1. 分组 (UART2 <= 6, UART4 > 6)
+      group1_cnt = 0; group2_cnt = 0;
+      for(int i=0; i<active_servo_count; i++) {
           uint8_t id = active_servo_list[i];
-          UART_HandleTypeDef *target_uart = (id <= 6) ? &huart2 : &huart4;
-          osMutexId_t target_mutex = (id <= 6) ? ServoUart1MutexHandle : ServoUart2MutexHandle;
-          
-          if (osMutexAcquire(target_mutex, 5) == osOK) {
-              int8_t res = -1;
-              // 重试机制 (Retry 3 times)
-              for(int k=0; k<3; k++) {
-                  res = ST_ReadInfo(target_uart, id, 
-                              &servo_data_ptr[i].pos, 
-                              &servo_data_ptr[i].speed, 
-                              &servo_data_ptr[i].load);
-                  if (res == 0) break; // 成功则退出
-                  osDelay(1); // 失败稍微等一下
-              }
-              
-              if (res != 0) {
-                  // 读取失败，标记为 0，方便上位机识别连接断开或超时
-                  servo_data_ptr[i].pos = 0;
-              }
-              
-              servo_data_ptr[i].id = id;
-              osMutexRelease(target_mutex);
+          if (id <= 6) {
+              if (group1_cnt < 6) group1_ids[group1_cnt++] = id;
           } else {
-              // 获取互斥锁失败
-              servo_data_ptr[i].id = id;
-              servo_data_ptr[i].pos = 0;
+              if (group2_cnt < 6) group2_ids[group2_cnt++] = id;
           }
-          osDelay(1); // 恢复为 1ms，保证整体采样频率接近 100Hz
       }
       
-      // 3. 计算总长度并发送
-      // 36 (IMU) + 1 (Count) + N * 7 (Servos)
-      rl_pkt.len = 37 + active_servo_count * sizeof(ServoFBParam_t);
+      // 2. 同步读 Group 1 (UART2)
+      if (group1_cnt > 0 && osMutexAcquire(ServoUart1MutexHandle, 5) == osOK) {
+          memset(rx_buf1, 0, 72);
+          if (ST_SyncRead(&huart2, group1_ids, group1_cnt, rx_buf1) == 0) {
+              // 解析
+              for(int i=0; i<group1_cnt; i++) {
+                  int base = i * 12;
+                  // 简单校验: Head(FF FF) + ID
+                  if (rx_buf1[base] == 0xFF && rx_buf1[base+2] == group1_ids[i]) {
+                      uint8_t *p = &rx_buf1[base+5]; // Data start
+                      // 查找在 output 数组中的位置
+                      for(int k=0; k<active_servo_count; k++) {
+                          if (active_servo_list[k] == group1_ids[i]) {
+                              servo_data_ptr[k].pos = (int16_t)(p[0] | (p[1]<<8));
+                              servo_data_ptr[k].speed = (int16_t)(p[2] | (p[3]<<8));
+                              servo_data_ptr[k].load = (int16_t)(p[4] | (p[5]<<8));
+                              break;
+                          }
+                      }
+                  }
+              }
+          }
+          osMutexRelease(ServoUart1MutexHandle);
+      }
       
-      // 只有当有数据时才发送，避免空跑垃圾数据
+      // 3. 同步读 Group 2 (UART4)
+      if (group2_cnt > 0 && osMutexAcquire(ServoUart2MutexHandle, 5) == osOK) {
+          memset(rx_buf2, 0, 72);
+          if (ST_SyncRead(&huart4, group2_ids, group2_cnt, rx_buf2) == 0) {
+              for(int i=0; i<group2_cnt; i++) {
+                  int base = i * 12;
+                  if (rx_buf2[base] == 0xFF && rx_buf2[base+2] == group2_ids[i]) {
+                      uint8_t *p = &rx_buf2[base+5];
+                      for(int k=0; k<active_servo_count; k++) {
+                          if (active_servo_list[k] == group2_ids[i]) {
+                              servo_data_ptr[k].pos = (int16_t)(p[0] | (p[1]<<8));
+                              servo_data_ptr[k].speed = (int16_t)(p[2] | (p[3]<<8));
+                              servo_data_ptr[k].load = (int16_t)(p[4] | (p[5]<<8));
+                              break;
+                          }
+                      }
+                  }
+              }
+          }
+          osMutexRelease(ServoUart2MutexHandle);
+      }
+      
+      // ID 填充
+      for(int i=0; i<active_servo_count; i++) servo_data_ptr[i].id = active_servo_list[i];
+
+      rl_pkt.len = 37 + active_servo_count * sizeof(ServoFBParam_t);
       if (active_servo_count > 0 || g_imu_data.angle[2] != 0.0f) {
            osMessageQueuePut(CommTxQueueHandle, &rl_pkt, 0, 0);
       }
   }
 }
-
+/* USER CODE END Header_StartFeedbackTask */
 /* USER CODE BEGIN Header_StartCommRxTask */
 void StartCommRxTask(void *argument)
 {
