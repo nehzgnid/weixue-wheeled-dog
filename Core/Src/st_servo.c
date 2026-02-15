@@ -38,6 +38,7 @@ int8_t ST_ReadInfo(UART_HandleTypeDef *huart, uint8_t id, int16_t *pos, int16_t 
     return 0;
 }
 
+
 void ST_WritePos(UART_HandleTypeDef *huart, uint8_t id, int16_t pos, uint16_t time, uint16_t speed, uint8_t acc) {
     uint8_t tx[15];
     uint8_t idx = 0;

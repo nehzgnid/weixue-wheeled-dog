@@ -156,10 +156,11 @@ void StartServoTask(void *argument)
   ServoBatch_t cmd;
   uint8_t ids1[6], ids2[6];
   int16_t pos1[6], pos2[6];
+  uint16_t time1[6], time2[6];
   uint16_t spd1[6], spd2[6];
-  uint16_t acc1[6], acc2[6];
+  uint8_t acc1[6], acc2[6];
 
-  osDelay(500);
+  osDelay(500); 
   
   // === 上电自检：恢复自动扫描模式 ===
   if (osMutexAcquire(ServoUart1MutexHandle, osWaitForever) == osOK) {
@@ -193,12 +194,14 @@ void StartServoTask(void *argument)
               if (cmd.params[j].id <= 6) { 
                   ids1[n1] = cmd.params[j].id;
                   pos1[n1] = cmd.params[j].pos;
+                  time1[n1] = cmd.params[j].time;
                   spd1[n1] = cmd.params[j].speed;
                   acc1[n1] = cmd.params[j].acc;
                   n1++;
               } else { 
                   ids2[n2] = cmd.params[j].id;
                   pos2[n2] = cmd.params[j].pos;
+                  time2[n2] = cmd.params[j].time;
                   spd2[n2] = cmd.params[j].speed;
                   acc2[n2] = cmd.params[j].acc;
                   n2++;
@@ -206,11 +209,11 @@ void StartServoTask(void *argument)
           }
           
           if (n1 > 0 && osMutexAcquire(ServoUart1MutexHandle, 5) == osOK) {
-              ST_SyncWritePos(&huart2, ids1, n1, pos1, spd1, acc1);
+              ST_SyncWritePos(&huart2, ids1, n1, pos1, time1, spd1, acc1);
               osMutexRelease(ServoUart1MutexHandle);
           }
           if (n2 > 0 && osMutexAcquire(ServoUart2MutexHandle, 5) == osOK) {
-              ST_SyncWritePos(&huart4, ids2, n2, pos2, spd2, acc2);
+              ST_SyncWritePos(&huart4, ids2, n2, pos2, time2, spd2, acc2);
               osMutexRelease(ServoUart2MutexHandle);
           }
       }
