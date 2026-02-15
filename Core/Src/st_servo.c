@@ -39,31 +39,32 @@ int8_t ST_ReadInfo(UART_HandleTypeDef *huart, uint8_t id, int16_t *pos, int16_t 
 }
 
 // 同步写 (控制核心)
-void ST_SyncWritePos(UART_HandleTypeDef *huart, uint8_t *ids, uint8_t count, int16_t *pos, uint16_t *speed, uint8_t *acc) {
+void ST_SyncWritePos(UART_HandleTypeDef *huart, uint8_t *ids, uint8_t count, int16_t *pos, uint16_t *speed, uint16_t *acc) {
     if (count > 6) return;
     uint8_t tx_buf[64];
     uint8_t idx = 0;
     
     tx_buf[idx++] = 0xFF; tx_buf[idx++] = 0xFF; tx_buf[idx++] = 0xFE;
-    tx_buf[idx++] = count * 6 + 4;
+    tx_buf[idx++] = count * 7 + 4; // 6 -> 7 bytes per servo
     tx_buf[idx++] = 0x83; // SYNC WRITE
     tx_buf[idx++] = 0x2A; // Addr: Target Pos
-    tx_buf[idx++] = 0x05; // Per-Servo Data Len (Pos2+Spd2+Acc1)
+    tx_buf[idx++] = 0x06; // Per-Servo Data Len (Pos2+Spd2+Acc2)
     
-    uint8_t sum = 0xFE + tx_buf[3] + 0x83 + 0x2A + 0x05;
+    uint8_t sum = 0xFE + tx_buf[3] + 0x83 + 0x2A + 0x06;
     
     for(int i=0; i<count; i++) {
         tx_buf[idx++] = ids[i]; sum += ids[i];
         
         uint16_t p = pos[i];
         uint16_t s = speed[i];
-        uint8_t a = acc[i];
+        uint16_t a = acc[i];
         
         tx_buf[idx++] = p & 0xFF; sum += p & 0xFF;
         tx_buf[idx++] = (p >> 8) & 0xFF; sum += (p >> 8) & 0xFF;
         tx_buf[idx++] = s & 0xFF; sum += s & 0xFF;
         tx_buf[idx++] = (s >> 8) & 0xFF; sum += (s >> 8) & 0xFF;
-        tx_buf[idx++] = a; sum += a;
+        tx_buf[idx++] = a & 0xFF; sum += a & 0xFF;
+        tx_buf[idx++] = (a >> 8) & 0xFF; sum += (a >> 8) & 0xFF;
     }
     
     tx_buf[idx++] = ~sum;

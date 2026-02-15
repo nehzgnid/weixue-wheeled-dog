@@ -157,9 +157,9 @@ void StartServoTask(void *argument)
   uint8_t ids1[6], ids2[6];
   int16_t pos1[6], pos2[6];
   uint16_t spd1[6], spd2[6];
-  uint8_t acc1[6], acc2[6];
+  uint16_t acc1[6], acc2[6];
 
-  osDelay(500); 
+  osDelay(500);
   
   // === 上电自检：恢复自动扫描模式 ===
   if (osMutexAcquire(ServoUart1MutexHandle, osWaitForever) == osOK) {

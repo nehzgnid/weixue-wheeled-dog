@@ -29,7 +29,7 @@ typedef struct __attribute__((packed)) { // 加上这个！防止编译器插入
     uint8_t id;
     int16_t pos;
     uint16_t speed;
-    uint8_t acc;
+    uint16_t acc;
 } ServoCtrlParam_t;
 
 // 舵机单机反馈参数 (7 bytes)
