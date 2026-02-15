@@ -29,7 +29,7 @@
 #define INST_SYNC_WRITE 0x83
 
 // API 函数声明 (增加 huart 参数)
-void ST_WritePos(UART_HandleTypeDef *huart, uint8_t id, int16_t pos, uint16_t speed, uint16_t acc);
+void ST_WritePos(UART_HandleTypeDef *huart, uint8_t id, int16_t pos, uint16_t time, uint16_t speed, uint8_t acc);
 // 声明同步读函数
 // ids: 舵机ID数组
 // count: 舵机数量
@@ -39,7 +39,7 @@ int ST_SyncRead(UART_HandleTypeDef *huart, uint8_t *ids, uint8_t count, uint8_t 
 
 // 现有的声明...
 void ST_SetTorque(UART_HandleTypeDef *huart, uint8_t id, uint8_t enable);
-void ST_SyncWritePos(UART_HandleTypeDef *huart, uint8_t *ids, uint8_t num, int16_t *pos, uint16_t *speed, uint16_t *acc);
+void ST_SyncWritePos(UART_HandleTypeDef *huart, uint8_t *ids, uint8_t num, int16_t *pos, uint16_t *time, uint16_t *speed, uint8_t *acc);
 int8_t ST_ReadInfo(UART_HandleTypeDef *huart, uint8_t id, int16_t *pos, int16_t *speed, int16_t *load);
 
 #endif

@@ -19,17 +19,18 @@
 
 // === 2. 规模配置 ===
 #define MAX_SERVO_COUNT      18    
-#define COMM_PAYLOAD_MAX     128   // 稍微加大一点以容纳 RL 包
+#define COMM_PAYLOAD_MAX     256   // 加大以支持更多舵机和更复杂的包
 
 // === 3. 数据结构 (1字节对齐) ===
 #pragma pack(1)
 
-// 舵机单机控制参数 (6 bytes)
-typedef struct __attribute__((packed)) { // 加上这个！防止编译器插入 Padding
+// 舵机单机控制参数 (8 bytes)
+typedef struct __attribute__((packed)) {
     uint8_t id;
-    int16_t pos;
-    uint16_t speed;
-    uint16_t acc;
+    uint8_t acc;      // Addr 41 (Acceleration)
+    int16_t pos;      // Addr 42-43 (Goal Position)
+    uint16_t time;    // Addr 44-45 (Goal Time)
+    uint16_t speed;   // Addr 46-47 (Goal Speed)
 } ServoCtrlParam_t;
 
 // 舵机单机反馈参数 (7 bytes)

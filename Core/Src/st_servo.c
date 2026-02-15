@@ -38,33 +38,53 @@ int8_t ST_ReadInfo(UART_HandleTypeDef *huart, uint8_t id, int16_t *pos, int16_t 
     return 0;
 }
 
+void ST_WritePos(UART_HandleTypeDef *huart, uint8_t id, int16_t pos, uint16_t time, uint16_t speed, uint8_t acc) {
+    uint8_t tx[15];
+    uint8_t idx = 0;
+    tx[idx++] = 0xFF; tx[idx++] = 0xFF; tx[idx++] = id;
+    tx[idx++] = 0x0A; // Len: 10 bytes following
+    tx[idx++] = 0x03; // Write
+    tx[idx++] = 0x29; // Addr: Acc (41)
+    tx[idx++] = acc;
+    tx[idx++] = pos & 0xFF;
+    tx[idx++] = (pos >> 8) & 0xFF;
+    tx[idx++] = time & 0xFF;
+    tx[idx++] = (time >> 8) & 0xFF;
+    tx[idx++] = speed & 0xFF;
+    tx[idx++] = (speed >> 8) & 0xFF;
+    tx[idx++] = CheckSum(tx, 15);
+    HAL_UART_Transmit(huart, tx, 15, 2);
+}
+
 // 同步写 (控制核心)
-void ST_SyncWritePos(UART_HandleTypeDef *huart, uint8_t *ids, uint8_t count, int16_t *pos, uint16_t *speed, uint16_t *acc) {
+void ST_SyncWritePos(UART_HandleTypeDef *huart, uint8_t *ids, uint8_t count, int16_t *pos, uint16_t *time, uint16_t *speed, uint8_t *acc) {
     if (count > 6) return;
     uint8_t tx_buf[64];
     uint8_t idx = 0;
     
     tx_buf[idx++] = 0xFF; tx_buf[idx++] = 0xFF; tx_buf[idx++] = 0xFE;
-    tx_buf[idx++] = count * 7 + 4; // 6 -> 7 bytes per servo
+    tx_buf[idx++] = count * 8 + 4; // 1 (ID) + 7 (DATA) = 8 bytes per servo
     tx_buf[idx++] = 0x83; // SYNC WRITE
-    tx_buf[idx++] = 0x2A; // Addr: Target Pos
-    tx_buf[idx++] = 0x06; // Per-Servo Data Len (Pos2+Spd2+Acc2)
+    tx_buf[idx++] = 0x29; // Addr: Acc (41)
+    tx_buf[idx++] = 0x07; // Per-Servo Data Len (Acc1+Pos2+Time2+Spd2)
     
-    uint8_t sum = 0xFE + tx_buf[3] + 0x83 + 0x2A + 0x06;
+    uint8_t sum = 0xFE + tx_buf[3] + 0x83 + 0x29 + 0x07;
     
     for(int i=0; i<count; i++) {
         tx_buf[idx++] = ids[i]; sum += ids[i];
         
+        uint8_t a = acc[i];
         uint16_t p = pos[i];
+        uint16_t t = time[i];
         uint16_t s = speed[i];
-        uint16_t a = acc[i];
         
+        tx_buf[idx++] = a; sum += a;
         tx_buf[idx++] = p & 0xFF; sum += p & 0xFF;
         tx_buf[idx++] = (p >> 8) & 0xFF; sum += (p >> 8) & 0xFF;
+        tx_buf[idx++] = t & 0xFF; sum += t & 0xFF;
+        tx_buf[idx++] = (t >> 8) & 0xFF; sum += (t >> 8) & 0xFF;
         tx_buf[idx++] = s & 0xFF; sum += s & 0xFF;
         tx_buf[idx++] = (s >> 8) & 0xFF; sum += (s >> 8) & 0xFF;
-        tx_buf[idx++] = a & 0xFF; sum += a & 0xFF;
-        tx_buf[idx++] = (a >> 8) & 0xFF; sum += (a >> 8) & 0xFF;
     }
     
     tx_buf[idx++] = ~sum;

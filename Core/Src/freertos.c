@@ -138,8 +138,8 @@ void MX_FREERTOS_Init(void) {
   ServoUart1MutexHandle = osMutexNew(&ServoUart1Mutex_attributes);
   ServoUart2MutexHandle = osMutexNew(&ServoUart2Mutex_attributes);
 
-  CommTxQueueHandle = osMessageQueueNew (8, 128, &CommTxQueue_attributes);
-  ServoCmdQueueHandle = osMessageQueueNew (4, 128, &ServoCmdQueue_attributes);
+  CommTxQueueHandle = osMessageQueueNew (8, 256, &CommTxQueue_attributes);
+  ServoCmdQueueHandle = osMessageQueueNew (4, 256, &ServoCmdQueue_attributes);
 
   ServoTaskHandle = osThreadNew(StartServoTask, NULL, &ServoTask_attributes);
   FeedbackTaskHandle = osThreadNew(StartFeedbackTask, NULL, &FeedbackTask_attributes);
@@ -315,7 +315,7 @@ void StartFeedbackTask(void *argument)
 void StartCommRxTask(void *argument)
 {
   uint8_t byte, state = 0, type = 0, len = 0, idx = 0, checksum = 0;
-  uint8_t payload[128];
+  uint8_t payload[256];
 
   for(;;)
   {
@@ -331,7 +331,7 @@ void StartCommRxTask(void *argument)
               case 1: if (byte == PROTOCOL_HEAD_2) { state = 2; checksum += byte; } else state = 0; break;
               case 2: type = byte; checksum += byte; state = 3; break;
               case 3: len = byte; checksum += byte; idx = 0; 
-                      if (len > 120) state = 0; else if (len == 0) state = 5; else state = 4; break;
+                      if (len == 0) state = 5; else state = 4; break;
               case 4: payload[idx++] = byte; checksum += byte; if (idx >= len) state = 5; break;
               case 5: if (byte == checksum) {
                           if (type == TYPE_SERVO_CTRL) {
@@ -370,7 +370,7 @@ void StartCommRxTask(void *argument)
 void StartCommTxTask(void *argument)
 {
   CommPacket_t pkt;
-  uint8_t buf[140]; 
+  uint8_t buf[256]; 
   for(;;)
   {
       // 优先级高的包 (Ping) 会先出队
