@@ -7,17 +7,19 @@ static uint8_t rx_ring_buf[RING_BUF_SIZE];
 static volatile uint32_t head = 0;
 static volatile uint32_t tail = 0;
 
+// Push One Byte
+void USB_RingBuffer_PushOne(uint8_t b) {
+    uint32_t next = (head + 1) % RING_BUF_SIZE;
+    if (next != tail) {
+        rx_ring_buf[head] = b;
+        head = next;
+    }
+}
+
 // 推入数据 (在 USB ISR 中调用)
 void USB_RingBuffer_Push(uint8_t* buf, uint32_t len) {
     for(uint32_t i=0; i<len; i++) {
-        uint32_t next = (head + 1) % RING_BUF_SIZE;
-        if (next != tail) { // 没满
-            rx_ring_buf[head] = buf[i];
-            head = next;
-        } else {
-            // 溢出丢弃
-            break; 
-        }
+        USB_RingBuffer_PushOne(buf[i]);
     }
 }
 

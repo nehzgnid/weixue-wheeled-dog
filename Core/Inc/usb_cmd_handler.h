@@ -12,6 +12,7 @@
 #define TYPE_PING            0x01  
 #define TYPE_SERVO_CTRL      0x10  
 #define TYPE_TORQUE_CTRL     0x11  
+#define TYPE_MOTOR_CTRL      0x12  // 新增: 电机速度控制
 #define TYPE_SERVO_FB        0x20  
 #define TYPE_SENSOR_IMU      0x30  
 #define TYPE_RL_STATE        0x40  // 新增: 强化学习专用全状态包
@@ -19,7 +20,7 @@
 
 // === 2. 规模配置 ===
 #define MAX_SERVO_COUNT      18    
-#define COMM_PAYLOAD_MAX     128   // 稍微加大一点以容纳 RL 包
+#define COMM_PAYLOAD_MAX     256   // 稍微加大一点以容纳 RL 包 + 电机数据
 
 // === 3. 数据结构 (1字节对齐) ===
 #pragma pack(1)
@@ -39,6 +40,11 @@ typedef struct {
     int16_t speed;
     int16_t load;
 } ServoFBParam_t;
+
+// 电机控制结构
+typedef struct __attribute__((packed)) {
+    float speeds[4]; // 4个电机的目标速度
+} MotorCtrlParam_t;
 
 // 通用通信包载荷
 typedef struct {

@@ -58,7 +58,91 @@ USBD_StatusTypeDef USBD_Get_USB_Status(HAL_StatusTypeDef hal_status);
 /* Private functions ---------------------------------------------------------*/
 
 /* USER CODE BEGIN 1 */
+static void PCD_SetupStageCallback(PCD_HandleTypeDef *hpcd)
+{
+  USBD_LL_SetupStage((USBD_HandleTypeDef*)hpcd->pData, (uint8_t *)hpcd->Setup);
+}
 
+static void PCD_DataOutStageCallback(PCD_HandleTypeDef *hpcd, uint8_t epnum)
+{
+  USBD_LL_DataOutStage((USBD_HandleTypeDef*)hpcd->pData, epnum, hpcd->OUT_ep[epnum].xfer_buff);
+}
+
+static void PCD_DataInStageCallback(PCD_HandleTypeDef *hpcd, uint8_t epnum)
+{
+  USBD_LL_DataInStage((USBD_HandleTypeDef*)hpcd->pData, epnum, hpcd->IN_ep[epnum].xfer_buff);
+}
+
+static void PCD_SOFCallback(PCD_HandleTypeDef *hpcd)
+{
+  USBD_LL_SOF((USBD_HandleTypeDef*)hpcd->pData);
+}
+
+static void PCD_ResetCallback(PCD_HandleTypeDef *hpcd)
+{
+  USBD_SpeedTypeDef speed = USBD_SPEED_FULL;
+
+  if ( hpcd->Init.speed == PCD_SPEED_HIGH)
+  {
+    speed = USBD_SPEED_HIGH;
+  }
+  else if ( hpcd->Init.speed == PCD_SPEED_FULL)
+  {
+    speed = USBD_SPEED_FULL;
+  }
+  else
+  {
+    Error_Handler();
+  }
+    /* Set Speed. */
+  USBD_LL_SetSpeed((USBD_HandleTypeDef*)hpcd->pData, speed);
+
+  /* Reset Device. */
+  USBD_LL_Reset((USBD_HandleTypeDef*)hpcd->pData);
+}
+
+static void PCD_SuspendCallback(PCD_HandleTypeDef *hpcd)
+{
+  /* Inform USB library that core enters in suspend Mode. */
+  USBD_LL_Suspend((USBD_HandleTypeDef*)hpcd->pData);
+  __HAL_PCD_GATE_PHYCLOCK(hpcd);
+  /* Enter in STOP mode. */
+  /* USER CODE BEGIN 2 */
+  if (hpcd->Init.low_power_enable)
+  {
+    /* Set SLEEPDEEP bit and SleepOnExit of Cortex System Control Register. */
+    SCB->SCR |= (uint32_t)((uint32_t)(SCB_SCR_SLEEPDEEP_Msk | SCB_SCR_SLEEPONEXIT_Msk));
+  }
+  /* USER CODE END 2 */
+}
+
+static void PCD_ResumeCallback(PCD_HandleTypeDef *hpcd)
+{
+  /* USER CODE BEGIN 3 */
+
+  /* USER CODE END 3 */
+  USBD_LL_Resume((USBD_HandleTypeDef*)hpcd->pData);
+}
+
+static void PCD_ISOOUTIncompleteCallback(PCD_HandleTypeDef *hpcd, uint8_t epnum)
+{
+  USBD_LL_IsoOUTIncomplete((USBD_HandleTypeDef*)hpcd->pData, epnum);
+}
+
+static void PCD_ISOINIncompleteCallback(PCD_HandleTypeDef *hpcd, uint8_t epnum)
+{
+  USBD_LL_IsoINIncomplete((USBD_HandleTypeDef*)hpcd->pData, epnum);
+}
+
+static void PCD_ConnectCallback(PCD_HandleTypeDef *hpcd)
+{
+  USBD_LL_DevConnected((USBD_HandleTypeDef*)hpcd->pData);
+}
+
+static void PCD_DisconnectCallback(PCD_HandleTypeDef *hpcd)
+{
+  USBD_LL_DevDisconnected((USBD_HandleTypeDef*)hpcd->pData);
+}
 /* USER CODE END 1 */
 
 /*******************************************************************************
@@ -91,7 +175,7 @@ void HAL_PCD_MspInit(PCD_HandleTypeDef* pcdHandle)
     __HAL_RCC_USB_OTG_FS_CLK_ENABLE();
 
     /* Peripheral interrupt init */
-    HAL_NVIC_SetPriority(OTG_FS_IRQn, 5, 0);
+    HAL_NVIC_SetPriority(OTG_FS_IRQn, 6, 0);
     HAL_NVIC_EnableIRQ(OTG_FS_IRQn);
   /* USER CODE BEGIN USB_OTG_FS_MspInit 1 */
 

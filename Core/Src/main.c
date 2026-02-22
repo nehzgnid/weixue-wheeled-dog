@@ -95,8 +95,10 @@ int main(void)
   MX_USART2_UART_Init();
   MX_USART3_UART_Init();
   MX_UART4_Init();
+  MX_UART5_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-
+MX_USB_DEVICE_Init();
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -176,19 +178,19 @@ void SystemClock_Config(void)
   * @param  htim : TIM handle
   * @retval None
   */
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
-{
-  /* USER CODE BEGIN Callback 0 */
+// void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+// {
+//   /* USER CODE BEGIN Callback 0 */
 
-  /* USER CODE END Callback 0 */
-  if (htim->Instance == TIM4)
-  {
-    HAL_IncTick();
-  }
-  /* USER CODE BEGIN Callback 1 */
+//   /* USER CODE END Callback 0 */
+//   if (htim->Instance == TIM4)
+//   {
+//     HAL_IncTick();
+//   }
+//   /* USER CODE BEGIN Callback 1 */
 
-  /* USER CODE END Callback 1 */
-}
+//   /* USER CODE END Callback 1 */
+// }
 
 /**
   * @brief  This function is executed in case of error occurrence.
@@ -201,6 +203,9 @@ void Error_Handler(void)
   __disable_irq();
   while (1)
   {
+      // Error Handler: Slow Blink (1s ON, 1s OFF)
+      HAL_GPIO_TogglePin(GPIOD, GPIO_PIN_13);
+      for(volatile int i=0; i<8000000; i++); 
   }
   /* USER CODE END Error_Handler_Debug */
 }

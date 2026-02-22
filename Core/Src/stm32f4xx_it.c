@@ -57,9 +57,12 @@
 /* External variables --------------------------------------------------------*/
 extern PCD_HandleTypeDef hpcd_USB_OTG_FS;
 extern DMA_HandleTypeDef hdma_uart4_rx;
+extern DMA_HandleTypeDef hdma_uart5_rx;
+extern DMA_HandleTypeDef hdma_uart5_tx;
 extern DMA_HandleTypeDef hdma_usart2_rx;
 extern DMA_HandleTypeDef hdma_usart3_rx;
 extern UART_HandleTypeDef huart4;
+extern UART_HandleTypeDef huart5;
 extern UART_HandleTypeDef huart2;
 extern UART_HandleTypeDef huart3;
 extern TIM_HandleTypeDef htim4;
@@ -97,6 +100,9 @@ void HardFault_Handler(void)
   while (1)
   {
     /* USER CODE BEGIN W1_HardFault_IRQn 0 */
+    // 快速闪烁 LED (PD13) 表示进入 HardFault
+    HAL_GPIO_TogglePin(GPIOD, GPIO_PIN_13);
+    for(volatile int i=0; i<10000000; i++); // 增加延时到 ~200ms
     /* USER CODE END W1_HardFault_IRQn 0 */
   }
 }
@@ -165,6 +171,20 @@ void DebugMon_Handler(void)
 /* For the available peripheral interrupt handler names,                      */
 /* please refer to the startup file (startup_stm32f4xx.s).                    */
 /******************************************************************************/
+
+/**
+  * @brief This function handles DMA1 stream0 global interrupt.
+  */
+void DMA1_Stream0_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA1_Stream0_IRQn 0 */
+
+  /* USER CODE END DMA1_Stream0_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_uart5_rx);
+  /* USER CODE BEGIN DMA1_Stream0_IRQn 1 */
+
+  /* USER CODE END DMA1_Stream0_IRQn 1 */
+}
 
 /**
   * @brief This function handles DMA1 stream1 global interrupt.
@@ -241,13 +261,34 @@ void USART2_IRQHandler(void)
   */
 void USART3_IRQHandler(void)
 {
-  /* USER CODE BEGIN USART3_IRQn 0 */
+  /* USER CODE BEGIN Motor_SendCmd  0 */
 
   /* USER CODE END USART3_IRQn 0 */
   HAL_UART_IRQHandler(&huart3);
   /* USER CODE BEGIN USART3_IRQn 1 */
 
   /* USER CODE END USART3_IRQn 1 */
+}
+
+/**
+  * @brief This function handles DMA1 stream7 global interrupt.
+  */
+void DMA1_Stream7_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA1_Stream7_IRQn 0 */
+  // 这里我们手动清除了所有标志位，以防止死循环 (Interrupt Storm)
+  // Mask: 0x0F400000 | 0x00400000 = 0x0F800000
+  // 位 27,26,25,24,22 -> 0x0F400000 (wait bit 22 is 0x00400000)
+  // 0x08000000(TC) + 0x04000000(HT) + 0x02000000(TE) + 0x01000000(DME) + 0x00400000(FE)
+  // = 0x0F000000 + 0x00400000 = 0x0F400000
+  DMA1->HIFCR = 0x0F400000;
+  return; // 直接返回，不调用 HAL_DMA_IRQHandler
+  
+  /* USER CODE END DMA1_Stream7_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_uart5_tx);
+  /* USER CODE BEGIN DMA1_Stream7_IRQn 1 */
+
+  /* USER CODE END DMA1_Stream7_IRQn 1 */
 }
 
 /**
@@ -265,6 +306,24 @@ void UART4_IRQHandler(void)
 }
 
 /**
+  * @brief This function handles UART5 global interrupt.
+  */
+void UART5_IRQHandler(void)
+{
+  /* USER CODE BEGIN UART5_IRQn 0 */
+  // 仅在非 TX 中断时调用，或者在 Motor_UART5_RxHandler 内部判断
+  extern void Motor_UART5_RxHandler(void);
+  Motor_UART5_RxHandler();
+  /* USER CODE END UART5_IRQn 0 */
+  HAL_UART_IRQHandler(&huart5);
+  /* USER CODE BEGIN UART5_IRQn 1 */
+  // 清除 TC 标志，防止 HAL 库有时候没清干净导致死循环（虽然 HAL 应该处理了）
+  __HAL_UART_CLEAR_FLAG(&huart5, UART_FLAG_TC);
+
+  /* USER CODE END UART5_IRQn 1 */
+}
+
+/**
   * @brief This function handles USB On The Go FS global interrupt.
   */
 void OTG_FS_IRQHandler(void)
@@ -279,5 +338,4 @@ void OTG_FS_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
-
 /* USER CODE END 1 */
