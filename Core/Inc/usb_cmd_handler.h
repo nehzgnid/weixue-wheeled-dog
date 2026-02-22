@@ -25,12 +25,13 @@
 // === 3. 数据结构 (1字节对齐) ===
 #pragma pack(1)
 
-// 舵机单机控制参数 (6 bytes)
-typedef struct __attribute__((packed)) { // 加上这个！防止编译器插入 Padding
+// 舵机单机控制参数 (8 bytes)
+typedef struct __attribute__((packed)) {
     uint8_t id;
-    int16_t pos;
-    uint16_t speed;
-    uint8_t acc;
+    uint8_t acc;      // Addr 41 (Acceleration)
+    int16_t pos;      // Addr 42-43 (Goal Position)
+    uint16_t time;    // Addr 44-45 (Goal Time)
+    uint16_t speed;   // Addr 46-47 (Goal Speed)
 } ServoCtrlParam_t;
 
 // 舵机单机反馈参数 (7 bytes)

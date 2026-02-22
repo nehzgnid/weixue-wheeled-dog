@@ -171,10 +171,10 @@ void MX_FREERTOS_Init(void) {
 
   /* Create the queue(s) */
   /* creation of CommTxQueue */
-  CommTxQueueHandle = osMessageQueueNew (8, 128, &CommTxQueue_attributes);
+  CommTxQueueHandle = osMessageQueueNew (8, 256, &CommTxQueue_attributes);
 
   /* creation of ServoCmdQueue */
-  ServoCmdQueueHandle = osMessageQueueNew (4, 128, &ServoCmdQueue_attributes);
+  ServoCmdQueueHandle = osMessageQueueNew (4, 256, &ServoCmdQueue_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
@@ -216,6 +216,13 @@ void StartServoTask(void *argument)
   // MX_USB_DEVICE_Init(); // 已在 main.c 中初始化，此处注释掉以防重复初始化
   /* USER CODE BEGIN StartServoTask */
   
+  ServoBatch_t cmd;
+  uint8_t ids1[6], ids2[6];
+  int16_t pos1[6], pos2[6];
+  uint16_t time1[6], time2[6];
+  uint16_t spd1[6], spd2[6];
+  uint8_t acc1[6], acc2[6];
+
   HAL_UART_Transmit(&huart1, (uint8_t*)"[DEBUG] ServoTask Started\r\n", 27, 100);
 
   Motor_Init();
@@ -225,14 +232,39 @@ void StartServoTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    // LED 闪烁心跳: 200ms 翻转一次
-    HAL_GPIO_TogglePin(GPIOD, GPIO_PIN_13);
-    
-    // 调试打印，确认任务还活着
-    // HAL_UART_Transmit(&huart1, (uint8_t*)"[Alive]\r\n", 9, 10);
-    
-    // Motor_Control_Loop 移至 FeedbackReportTask，以确保上报前刷新
-    osDelay(200);
+      // Process Servo Commands with timeout to allow Heartbeat
+      if (osMessageQueueGet(ServoCmdQueueHandle, &cmd, NULL, 200) == osOK) {
+          uint8_t n1 = 0, n2 = 0;
+          int j;
+          for(j=0; j<cmd.count; j++) {
+              if (cmd.params[j].id <= 6) { 
+                  ids1[n1] = cmd.params[j].id;
+                  pos1[n1] = cmd.params[j].pos;
+                  time1[n1] = cmd.params[j].time;
+                  spd1[n1] = cmd.params[j].speed;
+                  acc1[n1] = cmd.params[j].acc;
+                  n1++;
+              } else { 
+                  ids2[n2] = cmd.params[j].id;
+                  pos2[n2] = cmd.params[j].pos;
+                  time2[n2] = cmd.params[j].time;
+                  spd2[n2] = cmd.params[j].speed;
+                  acc2[n2] = cmd.params[j].acc;
+                  n2++;
+              }
+          }
+          
+          if (n1 > 0 && osMutexAcquire(ServoUart1MutexHandle, 5) == osOK) {
+              ST_SyncWritePos(&huart2, ids1, n1, pos1, time1, spd1, acc1);
+              osMutexRelease(ServoUart1MutexHandle);
+          }
+          if (n2 > 0 && osMutexAcquire(ServoUart2MutexHandle, 5) == osOK) {
+              ST_SyncWritePos(&huart4, ids2, n2, pos2, time2, spd2, acc2);
+              osMutexRelease(ServoUart2MutexHandle);
+          }
+      }
+      // LED Heartbeat (Toggle if idle or processed)
+      HAL_GPIO_TogglePin(GPIOD, GPIO_PIN_13);
   }
   /* USER CODE END StartServoTask */
 }
@@ -399,259 +431,141 @@ void StartFeedbackTask(void *argument)
 void StartCommRxTask(void *argument)
 {
   /* USER CODE BEGIN StartCommRxTask */
-  static uint8_t state = 0;
-  static uint8_t pkt_type = 0;
-  static uint8_t pkt_len = 0;
-  static uint8_t pkt_data[COMM_PAYLOAD_MAX];
-  static uint8_t pkt_idx = 0;
+  static uint8_t state = 0; 
+  static uint8_t type = 0;
+  static uint8_t len = 0;
+  static uint8_t idx = 0;
   static uint8_t checksum = 0;
+  static uint8_t payload[256];
   
-  // ASCII 解析相关变量
+  // ASCII parsing vars from HEAD
   static char ascii_buf[128];
   static uint8_t ascii_idx = 0;
   
-  uint8_t rx_byte;
+  uint8_t byte;
 
   /* Infinite loop */
   for(;;)
   {
-      // 循环读取，直到 Buffer 空
-      while (USB_RingBuffer_Pop(&rx_byte)) {
+      // 1. Wait for data signal (from USB ISR)
+      osThreadFlagsWait(0x01, osFlagsWaitAny, osWaitForever);
+
+      // 2. Process all bytes in ring buffer
+      while (USB_RingBuffer_Pop(&byte)) {
           
           // =======================
-          // 1. 同时进行 ASCII 解析侦测
+          // A. ASCII Parsing (Debug)
           // =======================
-          if (rx_byte == '$') {
-              ascii_idx = 0; // 复位 ASCII 缓冲区
-              ascii_buf[ascii_idx++] = rx_byte;
+          if (byte == '$') {
+              ascii_idx = 0; 
+              ascii_buf[ascii_idx++] = byte;
           } else if (ascii_idx > 0) {
               if (ascii_idx < 127) {
-                  ascii_buf[ascii_idx++] = rx_byte;
-                  if (rx_byte == '#') {
+                  ascii_buf[ascii_idx++] = byte;
+                  if (byte == '#') {
                       ascii_buf[ascii_idx] = '\0';
-                      // 收到完整的 ASCII 指令，直接转发给驱动板
-                      // Debug: Print received command to UART1
-                      // HAL_UART_Transmit(&huart1, (uint8_t*)"[CMD] ", 6, 10);
-                      // HAL_UART_Transmit(&huart1, (uint8_t*)ascii_buf, strlen(ascii_buf), 10);
-                      // HAL_UART_Transmit(&huart1, (uint8_t*)"\r\n", 2, 10);
-                      
+                      // Process ASCII Command
                       if (strncmp(ascii_buf, "$pwm:", 5) == 0) {
-                          // 手动解析，避免 sscanf 兼容性问题
                           char* p = strchr(ascii_buf, ':');
                           if (p) {
-                              p++; // Skip ':'
-                              float vals[4] = {0};
-                              int count = 0;
-                              char* end;
-                              for(int i=0; i<4; i++) {
-                                  vals[i] = strtof(p, &end);
-                                  if (p == end) break; // Parse fail
-                                  p = end;
-                                  if (*p == ',') p++;
-                                  count++;
-                              }
-                              
-                              if (count == 4) {
-                                   Motor_SetControlMode(MOTOR_MODE_PWM);
-                                   Motors[0].PWM_Output = (int16_t)vals[0];
-                                   Motors[1].PWM_Output = (int16_t)vals[1];
-                                   Motors[2].PWM_Output = (int16_t)vals[2];
-                                   Motors[3].PWM_Output = (int16_t)vals[3];
-                                   // [FIX] 移除任务上下文中的直接发送，统一由 ISR 处理以避免 DMA 竞态
-                                   // Motor_Send_PWM();
-                                   
-                                   // Debug
-                                   HAL_UART_Transmit(&huart1, (uint8_t*)"[CMD] Set PWM OK\r\n", 18, 10);
-                              }
-                          }
-                      }
-                      else if (strncmp(ascii_buf, "$spd:", 5) == 0) {
-                          char* p = strchr(ascii_buf, ':');
-                          if (p) {
-                              p++; // Skip ':'
+                              p++;
                               float vals[4] = {0};
                               int count = 0;
                               char* end;
                               for(int i=0; i<4; i++) {
                                   vals[i] = strtof(p, &end);
                                   if (p == end) break;
-                                  p = end;
-                                  if (*p == ',') p++;
+                                  p = end; if (*p == ',') p++;
                                   count++;
                               }
-                              
+                              if (count == 4) {
+                                   Motor_SetControlMode(MOTOR_MODE_PWM);
+                                   Motors[0].PWM_Output = (int16_t)vals[0];
+                                   Motors[1].PWM_Output = (int16_t)vals[1];
+                                   Motors[2].PWM_Output = (int16_t)vals[2];
+                                   Motors[3].PWM_Output = (int16_t)vals[3];
+                                   // Note: Motor_Check_Safety() or similar might be needed here
+                              }
+                          }
+                      }
+                      else if (strncmp(ascii_buf, "$spd:", 5) == 0) {
+                          char* p = strchr(ascii_buf, ':');
+                          if (p) {
+                              p++;
+                              float vals[4] = {0};
+                              int count = 0;
+                              char* end;
+                              for(int i=0; i<4; i++) {
+                                  vals[i] = strtof(p, &end);
+                                  if (p == end) break;
+                                  p = end; if (*p == ',') p++;
+                                  count++;
+                              }
                               if (count == 4) {
                                   Motor_SetControlMode(MOTOR_MODE_SPEED);
                                   Motor_SetAllSpeed(vals[0], vals[1], vals[2], vals[3]);
-                                  // [FIX] 移除任务上下文中的直接发送
-                                  // Motor_Control_Loop(); (Never call this from task!)
-                                  
-                                  // Debug
-                                  HAL_UART_Transmit(&huart1, (uint8_t*)"[CMD] Set Speed OK\r\n", 20, 10);
                               }
                           }
                       }
-                      ascii_idx = 0; // 处理完毕，复位
+                      ascii_idx = 0; 
                   }
               } else {
-                  ascii_idx = 0; // 缓冲区溢出，复位
+                  ascii_idx = 0; // Overflow
               }
           }
-           else if (ascii_idx == 0 && rx_byte == '$') { /* Double check for safety */
-              ascii_buf[ascii_idx++] = rx_byte;
-          }
 
           // =======================
-          // 2. 二进制协议解析
+          // B. Binary Protocol Parsing
           // =======================
           switch(state) {
-              case 0: // Head 1
-                  if (rx_byte == PROTOCOL_HEAD_1) state = 1;
-                  break;
-              case 1: // Head 2
-                  if (rx_byte == PROTOCOL_HEAD_2) state = 2;
-                  else if (rx_byte == PROTOCOL_HEAD_1) state = 1;
-                  else state = 0;
-                  break;
-              case 2: // Type
-                  pkt_type = rx_byte;
-                  checksum = rx_byte; // Start checksum calculation (Type + Len + Data)
-                  state = 3;
-                  break;
-              case 3: // Len
-                  pkt_len = rx_byte;
-                  checksum += rx_byte;
-                  if (pkt_len > COMM_PAYLOAD_MAX) {
-                      state = 0; // Error
-                  } else if (pkt_len == 0) {
-                      state = 5; // Skip data phase -> Checksum
-                  } else {
-                      pkt_idx = 0;
-                      state = 4;
-                  }
-                  break;
-              case 4: // Data
-                  pkt_data[pkt_idx++] = rx_byte;
-                  checksum += rx_byte;
-                  if (pkt_idx >= pkt_len) {
-                      state = 5;
-                  }
-                  break;
-              case 5: // Checksum     // ERROR #121 fix: ensure case is inside switch
-                  // 简单的和校验：Checksum Byte == Sum(Type+Len+Data)
-                  if (rx_byte == checksum) {
-                      // Handle Packet
-                      if (pkt_type == TYPE_MOTOR_CTRL) {
-                          // 二进制电机控制 (0x12) -> 默认视为速度控制
-                          if (pkt_len < COMM_PAYLOAD_MAX) {
-                              pkt_data[pkt_len] = '\0';
-                          } else {
-                              pkt_data[COMM_PAYLOAD_MAX-1] = '\0';
-                          }
-
-                          // 尝试解析为 float (兼容旧代码中的 string payload 或者是 binary struct?)
-                          // 用户要求: 支持二进制的速度控制指令
-                          // 假设 Payload 仍然通过字符串形式传输 (如果是兼容旧逻辑) 
-                          // 或者我们可以定义它为 struct {float v[4];}
-                          // 根据之前看到的发送代码: send_motor_command 只是把字符串打包进去
-                          // 但为了更高效，最理想是 Raw Float。
-                          // 上述代码中 pkt_data 是用来做 sscanf 的，说明之前是字符串。
-                          // 如果用户现在说是 "二进制速度控制指令"，可能意味着 Payload 本身是 float 数组?
-                          // 让我们先保持字符串解析逻辑以兼容，同时如果长度正好是 16 (4*float) 则作为 float 解析
+              case 0: if (byte == PROTOCOL_HEAD_1) { state = 1; checksum = byte; } break;
+              case 1: if (byte == PROTOCOL_HEAD_2) { state = 2; checksum += byte; } else if (byte == PROTOCOL_HEAD_1) state = 1; else state = 0; break;
+              case 2: type = byte; checksum += byte; state = 3; break;
+              case 3: len = byte; checksum += byte; idx = 0; 
+                      if (len == 0) state = 5; else state = 4; break;
+              case 4: payload[idx++] = byte; checksum += byte; if (idx >= len) state = 5; break;
+              case 5: if (byte == checksum) {
+                          // --- Handle Packet Types ---
                           
-                          if (pkt_len == 16) {
-                              // Raw Float Mode
-                              MotorCtrlParam_t *param = (MotorCtrlParam_t*)pkt_data;
-                              Motor_SetControlMode(MOTOR_MODE_SPEED);
-                              Motor_SetAllSpeed(param->speeds[0], param->speeds[1], param->speeds[2], param->speeds[3]);
+                          if (type == TYPE_SERVO_CTRL) { // 0x10
+                              ServoBatch_t batch;
+                              batch.count = payload[0];
+                              // Basic Check
+                              if (batch.count <= MAX_SERVO_COUNT && batch.count > 0) {
+                                  // Verify payload length for safety
+                                  if (len >= 1 + batch.count * sizeof(ServoCtrlParam_t)) {
+                                      memcpy(batch.params, &payload[1], batch.count * sizeof(ServoCtrlParam_t));
+                                      osMessageQueuePut(ServoCmdQueueHandle, &batch, 0, 0);
+                                  }
+                              }
                           }
-                          else {
-                              // String Mode fallback
-                              float s1=0, s2=0, s3=0, s4=0;
-                              if (sscanf((char*)pkt_data, "%f,%f,%f,%f", &s1, &s2, &s3, &s4) == 4) {
+                          else if (type == TYPE_MOTOR_CTRL) { // 0x12
+                              // Support both Raw Float (16 bytes) and String CSV (Legacy)
+                              if (len == 16) {
+                                  MotorCtrlParam_t *param = (MotorCtrlParam_t*)payload;
                                   Motor_SetControlMode(MOTOR_MODE_SPEED);
-                                  Motor_SetAllSpeed(s1, s2, s3, s4);
-                              } 
+                                  Motor_SetAllSpeed(param->speeds[0], param->speeds[1], param->speeds[2], param->speeds[3]);
+                              }
+                              else {
+                                  // Fallback: Try string parsing
+                                  // Ensure null termination safe
+                                  payload[COMM_PAYLOAD_MAX-1] = '\0';
+                                  if (len < COMM_PAYLOAD_MAX) payload[len] = '\0';
+                                  
+                                  float s1=0, s2=0, s3=0, s4=0;
+                                  if (sscanf((char*)payload, "%f,%f,%f,%f", &s1, &s2, &s3, &s4) == 4) {
+                                      Motor_SetControlMode(MOTOR_MODE_SPEED);
+                                      Motor_SetAllSpeed(s1, s2, s3, s4);
+                                  }
+                              }
                           }
                       } 
-                      else if (pkt_type == TYPE_SERVO_CTRL) {
-                          // Parse ServoBatch_t
-                          // Format: [Count(1)] + [ID(1), Pos(2), Speed(2), Acc(1)]...
-                          if (pkt_len >= 1) {
-                              uint8_t count = pkt_data[0];
-                              // Basic validation
-                              if (count > MAX_SERVO_COUNT) count = MAX_SERVO_COUNT;
-                              if (1 + count * sizeof(ServoCtrlParam_t) > pkt_len) {
-                                  count = (pkt_len - 1) / sizeof(ServoCtrlParam_t);
-                              }
-
-                              // Prepare separation buffers
-                              uint8_t g1_ids[12]; int16_t g1_pos[12]; uint16_t g1_spd[12]; uint8_t g1_acc[12];
-                              uint8_t g1_cnt = 0;
-                              
-                              uint8_t g2_ids[12]; int16_t g2_pos[12]; uint16_t g2_spd[12]; uint8_t g2_acc[12];
-                              uint8_t g2_cnt = 0;
-
-                              ServoCtrlParam_t *params = (ServoCtrlParam_t*)&pkt_data[1];
-                              
-                              for (int i = 0; i < count; i++) {
-                                  ServoCtrlParam_t p = params[i]; // Copy from packed struct
-                                  
-                                  if (p.id <= 6) {
-                                      if (g1_cnt < 12) {
-                                          g1_ids[g1_cnt] = p.id;
-                                          g1_pos[g1_cnt] = p.pos;
-                                          g1_spd[g1_cnt] = p.speed;
-                                          g1_acc[g1_cnt] = p.acc;
-                                          g1_cnt++;
-                                      }
-                                  } else {
-                                      if (g2_cnt < 12) {
-                                          g2_ids[g2_cnt] = p.id;
-                                          g2_pos[g2_cnt] = p.pos;
-                                          g2_spd[g2_cnt] = p.speed;
-                                          g2_acc[g2_cnt] = p.acc;
-                                          g2_cnt++;
-                                      }
-                                  }
-                              }
-
-                              // Execute Group 1 (UART2)
-                              if (g1_cnt > 0) {
-                                  if (osMutexAcquire(ServoUart2MutexHandle, 5) == osOK) {
-                                      // ST_SyncWritePos(&huart2, g1_ids, g1_cnt, g1_pos, g1_spd, g1_acc); // Missing parameters/func sig
-                                      // ST_SyncWrite(huart, id, pos, time/spd) is common, check st_servo.c for exact signature
-                                      // Assuming ST_SyncWrite:
-                                      // void ST_SyncWrite(UART_HandleTypeDef *huart, uint8_t *id_list, uint8_t count, uint16_t *pos_list, uint16_t *time_list, uint16_t *spd_list);
-                                      // The user code calls ST_SyncWritePos, I should check st_servo.h but let's assume valid call for now
-                                      // Just fixing braces
-                                      osMutexRelease(ServoUart2MutexHandle);
-                                  }
-                              }
-
-                              if (g1_cnt > 0) {
-                                  if (osMutexAcquire(ServoUart1MutexHandle, 5) == osOK) {
-                                      // ST_SyncWritePos(&huart2, g1_ids, g1_cnt, g1_pos, g1_spd, g1_acc); // Missing parameters/func sig
-                                      osMutexRelease(ServoUart1MutexHandle);
-                                  }
-                              }
-
-                              // Execute Group 2 (UART4)
-                              if (g2_cnt > 0) {
-                                  if (osMutexAcquire(ServoUart2MutexHandle, 5) == osOK) {
-                                      // ST_SyncWritePos(&huart4, g2_ids, g2_cnt, g2_pos, g2_spd, g2_acc);
-                                      osMutexRelease(ServoUart2MutexHandle);
-                                  }
-                              }
-                          } 
-                      }
-                  } 
-                  state = 0;
+                      state = 0;
                   break;
-
           }
       }
-      osDelay(1); // Buffer empty, release to OS
+
+      // No delay needed, we wait for signal at the top
   }
 }
 
