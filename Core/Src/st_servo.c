@@ -60,7 +60,7 @@ void ST_WritePos(UART_HandleTypeDef *huart, uint8_t id, int16_t pos, uint16_t ti
 // 同步写 (控制核心)
 void ST_SyncWritePos(UART_HandleTypeDef *huart, uint8_t *ids, uint8_t count, int16_t *pos, uint16_t *time, uint16_t *speed, uint8_t *acc) {
     if (count > 6) return;
-    uint8_t tx_buf[64];
+    uint8_t tx_buf[160];
     uint8_t idx = 0;
     
     tx_buf[idx++] = 0xFF; tx_buf[idx++] = 0xFF; tx_buf[idx++] = 0xFE;
@@ -89,7 +89,7 @@ void ST_SyncWritePos(UART_HandleTypeDef *huart, uint8_t *ids, uint8_t count, int
     }
     
     tx_buf[idx++] = ~sum;
-    HAL_UART_Transmit(huart, tx_buf, idx, 5);
+    HAL_UART_Transmit(huart, tx_buf, idx, 10);  // 增加到10ms超时
 }
 
 // 同步读 (性能核心)
