@@ -34,12 +34,17 @@ typedef struct __attribute__((packed)) {
 } ServoCtrlParam_t;
 
 // 舵机单机反馈参数 (7 bytes)
-typedef struct {
-    uint8_t id;
-    int16_t pos;
-    int16_t speed;
-    int16_t load;
-} ServoFBParam_t;
+// 7 bytes total - MUST be packed!
+typedef struct __attribute__((packed)) {
+    uint8_t id;        // 1 byte  (B)
+    int16_t pos;       // 2 bytes (h)
+    int16_t speed;     // 2 bytes (h)
+    int16_t load;      // 2 bytes (h)
+    int16_t current;   // 2 bytes (h) - 新增
+    uint8_t voltage;   // 1 byte  (B) - 新增
+    uint8_t temp;      // 1 byte  (B) - 新增
+} ServoFBParam_t;      // 总计: 11 bytes
+
 
 // 通用通信包载荷
 typedef struct {

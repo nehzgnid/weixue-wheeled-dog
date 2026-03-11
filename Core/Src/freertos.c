@@ -273,6 +273,10 @@ void StartFeedbackTask(void *argument)
                               servo_data_ptr[k].pos = (int16_t)(p[0] | (p[1]<<8));
                               servo_data_ptr[k].speed = (int16_t)(p[2] | (p[3]<<8));
                               servo_data_ptr[k].load = (int16_t)(p[4] | (p[5]<<8));
+                              // 填充缺失字段 (电流/电压/温度) - 避免Python解析报错
+                              servo_data_ptr[k].current = 0;
+                              servo_data_ptr[k].voltage = 0;
+                              servo_data_ptr[k].temp = 0;
                               break;
                           }
                       }
@@ -295,6 +299,10 @@ void StartFeedbackTask(void *argument)
                               servo_data_ptr[k].pos = (int16_t)(p[0] | (p[1]<<8));
                               servo_data_ptr[k].speed = (int16_t)(p[2] | (p[3]<<8));
                               servo_data_ptr[k].load = (int16_t)(p[4] | (p[5]<<8));
+                              // 填充缺失字段 (电流/电压/温度) - 避免Python解析报错
+                              servo_data_ptr[k].current = 0;
+                              servo_data_ptr[k].voltage = 0;
+                              servo_data_ptr[k].temp = 0;
                               break;
                           }
                       }
