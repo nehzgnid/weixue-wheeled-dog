@@ -124,7 +124,7 @@ int ST_SyncRead(UART_HandleTypeDef *huart, uint8_t *ids, uint8_t count, uint8_t 
     
     // Receive Stream
     // 每个舵机回包 12 字节
-    if (HAL_UART_Receive(huart, rx_buf, count * 12, 10) != HAL_OK) return -1;
+    if (HAL_UART_Receive(huart, rx_buf, count * 12, 5) != HAL_OK) return -1;
     
     return 0;
 }

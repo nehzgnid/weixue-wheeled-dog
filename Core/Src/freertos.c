@@ -238,13 +238,16 @@ void StartFeedbackTask(void *argument)
   
   for(;;)
   {
-      osDelay(5); // 200Hz !
+      osDelay(20); // Match the 50Hz deploy loop and reduce bus contention.
       
+      memset(&rl_pkt, 0, sizeof(rl_pkt));
+      rl_pkt.type = TYPE_RL_STATE;
+
       IMU_Parse_Loop(); 
       memcpy(imu_ptr, &g_imu_data, 36);
-      g_imu_data.updated = 0; 
-      
-      *servo_count_ptr = active_servo_count;
+      g_imu_data.updated = 0;
+
+      uint8_t fresh_count = 0;
       
       // 1. 分组 (UART2 <= 6, UART4 > 6)
       group1_cnt = 0; group2_cnt = 0;
@@ -270,13 +273,15 @@ void StartFeedbackTask(void *argument)
                       // 查找在 output 数组中的位置
                       for(int k=0; k<active_servo_count; k++) {
                           if (active_servo_list[k] == group1_ids[i]) {
-                              servo_data_ptr[k].pos = (int16_t)(p[0] | (p[1]<<8));
-                              servo_data_ptr[k].speed = (int16_t)(p[2] | (p[3]<<8));
-                              servo_data_ptr[k].load = (int16_t)(p[4] | (p[5]<<8));
+                              servo_data_ptr[fresh_count].id = group1_ids[i];
+                              servo_data_ptr[fresh_count].pos = (int16_t)(p[0] | (p[1]<<8));
+                              servo_data_ptr[fresh_count].speed = (int16_t)(p[2] | (p[3]<<8));
+                              servo_data_ptr[fresh_count].load = (int16_t)(p[4] | (p[5]<<8));
                               // 填充缺失字段 (电流/电压/温度) - 避免Python解析报错
-                              servo_data_ptr[k].current = 0;
-                              servo_data_ptr[k].voltage = 0;
-                              servo_data_ptr[k].temp = 0;
+                              servo_data_ptr[fresh_count].current = 0;
+                              servo_data_ptr[fresh_count].voltage = 0;
+                              servo_data_ptr[fresh_count].temp = 0;
+                              fresh_count++;
                               break;
                           }
                       }
@@ -296,13 +301,15 @@ void StartFeedbackTask(void *argument)
                       uint8_t *p = &rx_buf2[base+5];
                       for(int k=0; k<active_servo_count; k++) {
                           if (active_servo_list[k] == group2_ids[i]) {
-                              servo_data_ptr[k].pos = (int16_t)(p[0] | (p[1]<<8));
-                              servo_data_ptr[k].speed = (int16_t)(p[2] | (p[3]<<8));
-                              servo_data_ptr[k].load = (int16_t)(p[4] | (p[5]<<8));
+                              servo_data_ptr[fresh_count].id = group2_ids[i];
+                              servo_data_ptr[fresh_count].pos = (int16_t)(p[0] | (p[1]<<8));
+                              servo_data_ptr[fresh_count].speed = (int16_t)(p[2] | (p[3]<<8));
+                              servo_data_ptr[fresh_count].load = (int16_t)(p[4] | (p[5]<<8));
                               // 填充缺失字段 (电流/电压/温度) - 避免Python解析报错
-                              servo_data_ptr[k].current = 0;
-                              servo_data_ptr[k].voltage = 0;
-                              servo_data_ptr[k].temp = 0;
+                              servo_data_ptr[fresh_count].current = 0;
+                              servo_data_ptr[fresh_count].voltage = 0;
+                              servo_data_ptr[fresh_count].temp = 0;
+                              fresh_count++;
                               break;
                           }
                       }
@@ -313,10 +320,10 @@ void StartFeedbackTask(void *argument)
       }
       
       // ID 填充
-      for(int i=0; i<active_servo_count; i++) servo_data_ptr[i].id = active_servo_list[i];
+      *servo_count_ptr = fresh_count;
 
-      rl_pkt.len = 37 + active_servo_count * sizeof(ServoFBParam_t);
-      if (active_servo_count > 0 || g_imu_data.angle[2] != 0.0f) {
+      rl_pkt.len = 37 + fresh_count * sizeof(ServoFBParam_t);
+      if (fresh_count == 12 && fresh_count == active_servo_count) {
            osMessageQueuePut(CommTxQueueHandle, &rl_pkt, 0, 0);
       }
   }
